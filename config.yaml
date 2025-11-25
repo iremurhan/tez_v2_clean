@@ -26,7 +26,8 @@ model:
 # ==========================================
 loss:
   temperature: 0.07      # For Contrastive Loss (InfoNCE)
-  intra_weight: 0.0      # Weight for Intra-modal structure loss (Start 0.0 for baseline, then 0.1)
+  intra_img_weight: 0.0  # Weight for Intra-modal structure loss (Image-to-Image)
+  intra_txt_weight: 0.0  # Weight for Intra-modal structure loss (Text-to-Text)
 
 # ==========================================
 # Training Configuration

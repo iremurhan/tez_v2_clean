@@ -49,14 +49,20 @@ class CocoFeatureDataset(Dataset):
         # Karpathy JSON structure: images list contains items with 'split' and 'sentences'
         for img in data['images']:
             # Karpathy uses 'val' and 'test', but sometimes 'restval' is used for training
-            # Adjust logic if you want to include 'restval' in training
+            # [ADJUST] logic if you want to include 'restval' in training
             current_split = img['split']
             if current_split == 'restval' and split == 'train':
                 current_split = 'train'
 
             if current_split == split:
-                # Get COCO ID (prefer 'cocoid', fallback to 'imgid')
-                img_id = int(img.get('cocoid', img.get('imgid')))
+                if 'cocoid' not in img:
+                    if 'id' in img:
+                        img_id = int(img['id'])
+                    else:
+                        raise ValueError(f"Image entry missing 'cocoid' or 'id': {img}")     
+                else:
+                    img_id = int(img['cocoid'])
+                
                 valid_image_ids.add(img_id)
                 
                 # Add all 5 captions for this image
@@ -77,12 +83,11 @@ class CocoFeatureDataset(Dataset):
         manifest_path = split_dir / "manifest.csv"
         
         if not manifest_path.exists():
-            # Fallback: maybe features_dir is already the split dir?
-            if (Path(features_dir) / "manifest.csv").exists():
-                split_dir = Path(features_dir)
-                manifest_path = split_dir / "manifest.csv"
-            else:
-                raise FileNotFoundError(f"Manifest not found at {manifest_path}")
+            raise FileNotFoundError(
+                f"Manifest not found at: {manifest_path}\n"
+                f"Expected structure: {features_dir}/{split}/manifest.csv\n"
+                f"Please ensure directory structure matches the config."
+            )
             
         logger.info(f"Loading feature manifest from {manifest_path}")
         
@@ -123,8 +128,13 @@ class CocoFeatureDataset(Dataset):
         # ---------------------------------------------------------
         # 3. Consistency Check
         # ---------------------------------------------------------
-        # It is possible that we have captions for images we haven't loaded features for
-        # (e.g., during local debug with only shard000). We must prune those captions.
+        self._filter_samples()
+
+    def _filter_samples(self):
+        """
+        Prune captions for which we don't have loaded features.
+        This often happens during debugging with partial data.
+        """
         available_ids = set(self.image_features.keys())
         initial_len = len(self.samples)
         
@@ -144,13 +154,16 @@ class CocoFeatureDataset(Dataset):
         
         # 1. Retrieve Image Feature
         # Shape: [2048]
-        image_feat = self.image_features[image_id] 
+        image_feat = self.image_features[image_id]
         
         # 2. Feature Jitter (Augmentation for Intra-Modal Learning)
-        # Only apply noise if noise_std is set (usually > 0 during training)
+        # If noise_std > 0, we generate a second view by adding noise.
+        # If noise_std == 0 (val/test), the second view is identical to the first.
         if self.noise_std > 0:
             noise = torch.randn_like(image_feat) * self.noise_std
-            image_feat = image_feat + noise
+            aug_feat = image_feat + noise
+        else:
+            aug_feat = image_feat.clone()
             
         # 3. Tokenize Text
         tokenized = self.tokenizer(
@@ -163,6 +176,7 @@ class CocoFeatureDataset(Dataset):
         
         return {
             'image': image_feat,       
+            'image_aug': aug_feat,
             'input_ids': tokenized['input_ids'].squeeze(0),
             'attention_mask': tokenized['attention_mask'].squeeze(0),
             'index': idx,
@@ -174,18 +188,18 @@ def get_dataloader(config, tokenizer, split='train'):
     Factory function to create dataloaders.
     """
     # Determine noise level based on config and split
-    # Only apply noise during training and if feature jitter is enabled
     noise = 0.0
     shuffle = False
     
     if split == 'train':
         shuffle = True
         # Check if augmentation is enabled in config structure
-        # Fallback to 0.0 if keys are missing (safety)
+        # Expects config['augment']['image']['feature_jitter']['std']
         try:
-            if config.get('augment', {}).get('image', {}).get('feature_jitter', {}).get('enabled', False):
-                noise = config['augment']['image']['feature_jitter'].get('std', 0.02)
-        except:
+            aug_config = config.get('augment', {}).get('image', {}).get('feature_jitter', {})
+            if aug_config.get('enabled', False):
+                noise = aug_config.get('std', 0.0)
+        except Exception:
             noise = 0.0
     
     # Path handling
