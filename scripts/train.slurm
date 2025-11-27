@@ -15,7 +15,7 @@
 # We map server paths (Host) to the paths expected by config.yaml (Container).
 #
 # 1. Codebase:
-#    Host: /users/beyza.urhan/experiments/tez_v2_clean
+#    Host: /users/beyza.urhan/tez_v2_clean
 #    Container: /workspace
 #
 # 2. Features:
