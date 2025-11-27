@@ -215,6 +215,15 @@ def get_dataloader(config, tokenizer, split='train'):
         noise_std=noise
     )
 
+    # If debug mode is on and dataset is too large, force truncate it.
+    if config['debug']['debug_mode']:
+        debug_limit = config['debug']['debug_samples']
+        
+        # Cut the dataset list
+        if len(dataset.samples) > debug_limit:
+            logger.warning(f"DEBUG MODE: Truncating dataset from {len(dataset.samples)} to {debug_limit} samples.")
+            dataset.samples = dataset.samples[:debug_limit]
+
     loader = DataLoader(
         dataset,
         batch_size=config['data']['batch_size'],

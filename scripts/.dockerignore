@@ -1,0 +1,9 @@
+# macOS Artifacts
+**/.DS_Store
+**/._*
+
+# Ignore everything by default to keep build context small
+*
+
+# Allow requirements.txt for dependency installation
+!requirements.txt

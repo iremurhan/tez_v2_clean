@@ -6,7 +6,7 @@
 data:
   features_path: "datasets/coco/features"
   # Caption path: Using Karpathy JSON structure usually
-  captions_path: "datasets/coco/annotations_train_val2014/annotations/captions_train2014.json"
+  captions_path: "datasets/coco/caption_datasets/dataset_coco.json"
   batch_size: 64
   num_workers: 4
   max_length: 50  # Max token length for DistilBERT (saves compute)
@@ -49,14 +49,24 @@ training:
 logging:
   use_wandb: true
   wandb_project: "coco-retrieval-thesis"
-  log_freq: 10              # Log every 10 batches to see progress
+  log_freq: 500              # Log every 500 batches to see progress
+  eval_freq: 2              # Evaluate every 2 epochs
   save_freq: 5              # Save checkpoint every 5 epochs
   checkpoint_dir: "checkpoints"
+
+# ==========================================
+# Augmentation Configuration
+# ==========================================
+augment:
+  image:
+    feature_jitter:
+      enabled: true
+      std: 0.02
 
 # ==========================================
 # Debug Configuration
 # ==========================================
 debug:
-  debug_mode: false         # Set true to use tiny subset
-  debug_samples: 100        # Only use 100 images for debugging
+  debug_mode: true         # Set true to use tiny subset
+  debug_samples: 100       # Only use 100 images for debugging
   disable_wandb_sync: true  # Don't upload debug logs

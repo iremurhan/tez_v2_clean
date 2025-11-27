@@ -8,7 +8,7 @@ from .utils import AverageMeter, compute_recall_at_k
 logger = logging.getLogger(__name__)
 
 class Trainer:
-    def __init__(self, model, train_loader, val_loader, criterion, optimizer, scheduler, config, device):
+    def __init__(self, model, train_loader, val_loader, criterion, optimizer, scheduler, config, device, use_wandb=True):
         self.model = model
         self.train_loader = train_loader
         self.val_loader = val_loader
@@ -18,12 +18,40 @@ class Trainer:
         self.config = config
         self.device = device
         
-        self.use_wandb = config['logging']['use_wandb'] and not config['debug']['disable_wandb_sync']
+        self.use_wandb = use_wandb
         self.checkpoint_dir = config['logging']['checkpoint_dir']
         self.best_r1 = 0.0
         
         # Create checkpoint directory
         os.makedirs(self.checkpoint_dir, exist_ok=True)
+
+    def load_checkpoint(self, checkpoint_path):
+        """
+        Loads full training state from a checkpoint file.
+        Returns start_epoch.
+        """
+        logger.info(f"Loading checkpoint from {checkpoint_path}")
+        checkpoint = torch.load(checkpoint_path, map_location=self.device)
+        
+        # 1. Load Weights
+        self.model.load_state_dict(checkpoint['model_state_dict'])
+        self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
+        self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        
+        # 2. Load State Info (STRICT)
+        # Eğer bu anahtarlar yoksa kod burada KeyError verip duracak.
+        # Bu sayede "bozuk checkpoint" ile yanlışlıkla en baştan başlamazsın.
+        if 'best_r1' not in checkpoint or 'epoch' not in checkpoint:
+            logger.error(f"Checkpoint file {checkpoint_path} is missing critical keys ('epoch' or 'best_r1').")
+            logger.error("Cannot resume training safely. Aborting.")
+            raise KeyError("Invalid checkpoint format for resuming.")
+
+        self.best_r1 = checkpoint['best_r1']
+        start_epoch = checkpoint['epoch']
+        
+        logger.info(f"Resuming successfully from epoch {start_epoch} with Best R@1: {self.best_r1:.2f}")
+        
+        return start_epoch
 
     def train_epoch(self, epoch):
         self.model.train()
@@ -66,7 +94,15 @@ class Trainer:
             pbar.set_postfix({"Loss": f"{losses.avg:.4f}"})
             
             if self.use_wandb and step % self.config['logging']['log_freq'] == 0:
-                wandb.log({"train/loss": losses.val, "train/epoch": epoch})
+                current_lr = self.optimizer.param_groups[0]['lr']
+                try:
+                    wandb.log({
+                        "train/loss": losses.val, 
+                        "train/epoch": epoch,
+                        "train/lr": current_lr
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to log to W&B: {e}")
         
         self.scheduler.step()
         return losses.avg
@@ -77,7 +113,10 @@ class Trainer:
         img_embeds_list = []
         txt_embeds_list = []
         
-        for batch in tqdm(self.val_loader, desc="Evaluating"):
+        # Handle "TEST" epoch logging string
+        epoch_log = epoch if isinstance(epoch, str) else epoch
+        
+        for batch in tqdm(self.val_loader, desc=f"Evaluating ({epoch_log})"):
             images = batch['image'].to(self.device)
             input_ids = batch['input_ids'].to(self.device)
             attention_mask = batch['attention_mask'].to(self.device)
@@ -96,19 +135,95 @@ class Trainer:
         r_t2i, r_i2t = compute_recall_at_k(img_embeds_unique, txt_embeds)
         
         # Log
-        logger.info(f"Epoch {epoch} Results: T2I R@1: {r_t2i[1]:.2f} | I2T R@1: {r_i2t[1]:.2f}")
+        logger.info(
+            f"Epoch {epoch_log} Results:\n"
+            f"  T2I: R@1: {r_t2i[1]:.2f} | R@5: {r_t2i[5]:.2f} | R@10: {r_t2i[10]:.2f}\n"
+            f"  I2T: R@1: {r_i2t[1]:.2f} | R@5: {r_i2t[5]:.2f} | R@10: {r_i2t[10]:.2f}"
+        )
         
         if self.use_wandb:
-            wandb.log({"val/t2i_r1": r_t2i[1], "val/i2t_r1": r_i2t[1], "epoch": epoch})
+            if isinstance(epoch, int):
+                try:
+                    wandb.log({
+                        "val/t2i_r1": r_t2i[1], "val/t2i_r5": r_t2i[5], "val/t2i_r10": r_t2i[10],
+                        "val/i2t_r1": r_i2t[1], "val/i2t_r5": r_i2t[5], "val/i2t_r10": r_i2t[10],
+                        "epoch": epoch
+                    })
+                except Exception as e:
+                    logger.warning(f"Failed to log to W&B: {e}")
             
         return r_t2i[1]
 
-    def fit(self):
-        for epoch in range(self.config['training']['epochs']):
+    def fit(self, start_epoch=0):
+        eval_frequency = self.config['logging']['eval_freq'] 
+        save_frequency = self.config['logging']['save_freq']
+
+        # If start_epoch is 0 (i.e., not resuming), run initial evaluation.
+        if start_epoch == 0:
+            logger.info("Running initial evaluation at Epoch 0...")
+            score = self.evaluate(epoch=0) # Label as Epoch=0
+            
+            # At Epoch 0, only saving Last Model makes sense, not Best.
+            # However, to simplify: If score > 0, let this be the first record.
+            if score > self.best_r1:
+                self.best_r1 = score
+                
+            logger.info(f"Initial state saved. Starting training loop from Epoch {start_epoch}.")
+
+        # --- MAIN TRAINING LOOP ---
+        for epoch in range(start_epoch, self.config['training']['epochs']):
             train_loss = self.train_epoch(epoch)
-            # Save checkpoint based on config
-            if (epoch + 1) % self.config['logging']['save_freq'] == 0:
+            logger.info(f"Epoch {epoch+1} Training Loss: {train_loss:.4f}")
+            
+            score = None
+            is_best_model = False
+
+            # --- 1. EVALUATION CONTROL ---
+            # Note: Using (epoch + 1) to match standard epoch counting (1, 2, 3...)
+            is_eval_time = ((epoch + 1) % eval_frequency == 0) or ((epoch + 1) == self.config['training']['epochs'])
+            
+            if is_eval_time:
                 score = self.evaluate(epoch)
+                
                 if score > self.best_r1:
-                    self.best_r1 = score
-                    torch.save(self.model.state_dict(), os.path.join(self.checkpoint_dir, "best_model.pth"))
+                    is_best_model = True
+                    self.best_r1 = score 
+            
+            # --- 2. SAVING CONTROL ---
+            is_save_time = ((epoch + 1) % save_frequency == 0) or ((epoch + 1) == self.config['training']['epochs'])
+
+            if is_save_time:
+                # If score not computed but needed for saving (eval_freq > save_freq case)
+                if score is None:
+                    logger.warning("Score not computed! Forcing evaluation to save checkpoint.")
+                    score = self.evaluate(epoch)
+                    is_best_model = (score > self.best_r1)
+                    if is_best_model:
+                        self.best_r1 = score
+
+                # Construct full checkpoint
+                checkpoint = {
+                    'epoch': epoch + 1,
+                    'model_state_dict': self.model.state_dict(),
+                    'optimizer_state_dict': self.optimizer.state_dict(),
+                    'scheduler_state_dict': self.scheduler.state_dict(),
+                    'best_r1': self.best_r1,
+                    'config': self.config
+                }
+
+                # 3. Save Latest
+                last_path = os.path.join(self.checkpoint_dir, "last_model.pth")
+                torch.save(checkpoint, last_path)
+
+                # 4. Save Best
+                if is_best_model:
+                    checkpoint['best_r1'] = score 
+                    
+                    best_name = f"best_model_ep{epoch+1}_r1_{score:.2f}.pth"
+                    best_path = os.path.join(self.checkpoint_dir, best_name)
+                    torch.save(checkpoint, best_path)
+                    
+                    standard_best_path = os.path.join(self.checkpoint_dir, "best_model.pth")
+                    torch.save(checkpoint, standard_best_path)
+                    
+                    logger.info(f"New Best R@1: {score:.2f} | Saved to {best_name}")
