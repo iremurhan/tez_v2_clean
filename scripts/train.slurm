@@ -8,7 +8,28 @@
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=40G
 #SBATCH --container-image=biremurhan/image-text-contrast:v0.4
-#SBATCH --container-mounts=/users/beyza.urhan/experiments/tez_v2_clean:/workspace,/users/beyza.urhan/experiments/features_karpathy:/workspace/datasets/coco/features,/users/beyza.urhan/experiments/datasets:/workspace/datasets/coco/caption_datasets,/users/beyza.urhan/experiments/runs:/output
+
+# ------------------------------------------------------------------
+# PATH MAPPING (CRITICAL)
+# ------------------------------------------------------------------
+# We map server paths (Host) to the paths expected by config.yaml (Container).
+#
+# 1. Codebase:
+#    Host: /users/beyza.urhan/experiments/tez_v2_clean
+#    Container: /workspace
+#
+# 2. Features:
+#    Host: /users/beyza.urhan/experiments/features_karpathy/resnet50_scratch  <-- Point directly to the folder containing train/val/test
+#    Container: /workspace/datasets/coco/features
+#
+# 3. Captions (JSON):
+#    Host: /users/beyza.urhan/experiments/datasets/coco/caption_datasets
+#    Container: /workspace/datasets/coco/caption_datasets
+#
+# 4. Outputs:
+#    Host: /users/beyza.urhan/experiments/runs
+#    Container: /output
+#SBATCH --container-mounts=/users/beyza.urhan/experiments/tez_v2_clean:/workspace,/users/beyza.urhan/experiments/features_karpathy/resnet50_scratch:/workspace/datasets/coco/features,/users/beyza.urhan/experiments/datasets/coco/caption_datasets:/workspace/datasets/coco/caption_datasets,/users/beyza.urhan/experiments/runs:/output
 
 export WANDB_MODE=offline
 export WANDB_DIR=/output/${SLURM_JOB_ID}
