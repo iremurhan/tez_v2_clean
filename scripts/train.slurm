@@ -29,7 +29,7 @@
 # 4. Outputs:
 #    Host: /users/beyza.urhan/experiments/runs
 #    Container: /output
-#SBATCH --container-mounts=/users/beyza.urhan/experiments/tez_v2_clean:/workspace,/users/beyza.urhan/experiments/features_karpathy/resnet50_scratch:/workspace/datasets/coco/features,/users/beyza.urhan/experiments/datasets/coco/caption_datasets:/workspace/datasets/coco/caption_datasets,/users/beyza.urhan/experiments/runs:/output
+#SBATCH --container-mounts=/users/beyza.urhan/tez_v2_clean:/workspace,/users/beyza.urhan/experiments/features_karpathy/resnet50_scratch:/workspace/datasets/coco/features,/users/beyza.urhan/experiments/datasets/coco/caption_datasets:/workspace/datasets/coco/caption_datasets,/users/beyza.urhan/experiments/runs:/output
 
 export WANDB_MODE=offline
 export WANDB_DIR=/output/${SLURM_JOB_ID}
