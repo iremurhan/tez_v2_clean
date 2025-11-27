@@ -1,0 +1,16 @@
+# macOS Artifacts
+._*
+.DS_Store
+.Trashes
+
+# Python
+__pycache__/
+*.pyc
+*.pyo
+*.pyd
+*.pyw
+*.pyz
+
+# Dataset
+datasets/
+checkpoints
