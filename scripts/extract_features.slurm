@@ -30,7 +30,7 @@
 # ------------------------------------------------------------------
 # SETTINGS
 # ------------------------------------------------------------------
-WEIGHTS="scratch"  # Options: 'scratch' (untrained) or 'imagenet' (pretrained)
+WEIGHTS="imagenet"  # Options: 'scratch' (untrained) or 'imagenet' (pretrained)
 BS=256
 NW=8
 JSON_PATH="/data/caption_datasets/dataset_coco.json"  # Container path
