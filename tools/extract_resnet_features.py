@@ -38,9 +38,12 @@ def list_images_karpathy_split(images_root: Path, split: str, karpathy_json_path
         data = json.load(f)
     
     # Filter images by split
-    # Note: 'restval' images are technically in the train set for some definitions, 
-    # but Karpathy defines specific splits.
-    split_images = [img for img in data['images'] if img.get('split') == split]
+    # FIX: If split is 'train', also include 'restval' to get full 113k images
+    if split == 'train':
+        print("[Info] Merging 'train' and 'restval' splits for training set...")
+        split_images = [img for img in data['images'] if img.get('split') in ['train', 'restval']]
+    else:
+        split_images = [img for img in data['images'] if img.get('split') == split]
     
     if not split_images:
         raise ValueError(f"No images found for split '{split}' in {karpathy_json_path}")
