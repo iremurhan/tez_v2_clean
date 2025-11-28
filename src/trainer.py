@@ -2,7 +2,6 @@ import torch
 import logging
 import wandb
 import os
-from tqdm import tqdm
 from .utils import AverageMeter, compute_recall_at_k
 
 logger = logging.getLogger(__name__)
@@ -19,6 +18,7 @@ class Trainer:
         self.device = device
         
         self.use_wandb = use_wandb
+        self.log_freq = config['logging']['log_freq']
         self.checkpoint_dir = config['logging']['checkpoint_dir']
         self.best_r1 = 0.0
         
@@ -57,9 +57,9 @@ class Trainer:
         self.model.train()
         losses = AverageMeter()
         
-        pbar = tqdm(self.train_loader, desc=f"Epoch {epoch+1} [Train]", ncols=100)
+        num_batches = len(self.train_loader)
         
-        for step, batch in enumerate(pbar):
+        for step, batch in enumerate(self.train_loader):
             images = batch['image'].to(self.device)
             images_aug = batch['image_aug'].to(self.device) # For Intra-modal Image consistency
             input_ids = batch['input_ids'].to(self.device)
@@ -91,18 +91,21 @@ class Trainer:
             self.optimizer.step()
             
             losses.update(loss.item(), images.size(0))
-            pbar.set_postfix({"Loss": f"{losses.avg:.4f}"})
             
-            if self.use_wandb and step % self.config['logging']['log_freq'] == 0:
+
+            if step % self.log_freq == 0:
                 current_lr = self.optimizer.param_groups[0]['lr']
-                try:
-                    wandb.log({
-                        "train/loss": losses.val, 
-                        "train/epoch": epoch,
-                        "train/lr": current_lr
-                    })
-                except Exception as e:
-                    logger.warning(f"Failed to log to W&B: {e}")
+                logger.info(f"Epoch {epoch+1} [{step}/{num_batches}] Loss: {losses.avg:.4f} | LR: {current_lr:.6f}")
+                
+                if self.use_wandb:
+                    try:
+                        wandb.log({
+                            "train/loss": losses.val, 
+                            "train/epoch": epoch,
+                            "train/lr": current_lr
+                        })
+                    except Exception as e:
+                        logger.warning(f"Failed to log to W&B: {e}")
         
         self.scheduler.step()
         return losses.avg
@@ -115,8 +118,9 @@ class Trainer:
         
         # Handle "TEST" epoch logging string
         epoch_log = epoch if isinstance(epoch, str) else epoch
+        logger.info(f"Starting Evaluation ({epoch_log})...")
         
-        for batch in tqdm(self.val_loader, desc=f"Evaluating ({epoch_log})"):
+        for batch in self.val_loader:
             images = batch['image'].to(self.device)
             input_ids = batch['input_ids'].to(self.device)
             attention_mask = batch['attention_mask'].to(self.device)
