@@ -4,7 +4,7 @@
 #
 #SBATCH --job-name=cmr-train
 #SBATCH --output=/users/beyza.urhan/experiments/runs/%j/slurm.log
-#SBATCH --error=/users/beyza.urhan/experiments/runs/%j/slurm_err.log
+#SBATCH --error=/users/beyza.urhan/experiments/runs/%j/err.log
 #SBATCH --time=14:00:00
 #SBATCH --gpus=1
 #SBATCH --cpus-per-gpu=8
@@ -14,7 +14,10 @@
 # ------------------------------------------------------------------
 # PATH MAPPING
 # ------------------------------------------------------------------
-#SBATCH --container-mounts=/users/beyza.urhan/tez_v2_clean:/workspace,/users/beyza.urhan/experiments/datasets/coco/features_karpathy/resnet50_scratch:/workspace/datasets/coco/features_karpathy,/users/beyza.urhan/experiments/datasets/coco/caption_datasets:/workspace/datasets/coco/caption_datasets,/users/beyza.urhan/experiments/runs:/output
+#SBATCH --container-mounts=/users/beyza.urhan/tez_v2_clean:/workspace,/users/beyza.urhan/experiments/datasets/coco/features_karpathy/resnet50_scratch:/workspace/datasets/coco/features_karpathy,/users/beyza.urhan/experiments/datasets/coco/caption_datasets:/workspace/datasets/coco/caption_datasets,/users/beyza.urhan/experiments/runs:/output,/users/beyza.urhan/experiments/env:/env
+
+# Pass W&B Env vars if they exist in the shell context
+#SBATCH --container-env=WANDB_API_KEY,WANDB_MODE
 
 set -euo pipefail
 
@@ -24,7 +27,7 @@ set -euo pipefail
 EXP_NAME="${1:-}"
 JOB_DIR="/output/${SLURM_JOB_ID}${EXP_NAME:+_${EXP_NAME}}"
 
-# Subdirectories for organization
+# Subdirectories
 LOGS_DIR="$JOB_DIR/logs"
 META_DIR="$JOB_DIR/metadata"
 CKPT_DIR="$JOB_DIR/checkpoints"
@@ -37,9 +40,29 @@ echo "Experiment:    ${EXP_NAME:-}"
 echo "Job Directory: ${JOB_DIR}"
 echo "=========================================="
 
-# W&B Settings
-export WANDB_MODE=offline
+# ------------------------------------------------------------------
+# W&B SETUP (ONLINE/OFFLINE AUTO-DETECT)
+# ------------------------------------------------------------------
+# Always save logs to our specific folder
 export WANDB_DIR="$LOGS_DIR"
+
+# Load W&B Env file if mounted
+if [ -f /env/wandb.env ]; then
+    echo "✓ Loading W&B credentials from /env/wandb.env"
+    # Source the file and export variables
+    set -a  # Automatically export all variables
+    source /env/wandb.env
+    set +a
+fi
+
+# Check if API key is available
+if [ -n "${WANDB_API_KEY:-}" ]; then
+    echo "✓ W&B API Key found."
+    export WANDB_MODE=online
+else
+    echo "W&B API Key not found. Switching to OFFLINE mode."
+    export WANDB_MODE=offline
+fi
 
 # ------------------------------------------------------------------
 # METADATA & CONFIG
@@ -68,14 +91,12 @@ echo ""
 
 cd /workspace
 
-# Use tee to stream logs to stdout AND file
-# --override debug.debug_mode=true (Keep enabled for initial test)
+# PRODUCTION RUN (Debug Mode FALSE)
 python3 -u train.py \
     --config config.yaml \
     --override debug.debug_mode=false \
     2>&1 | tee "$LOGS_DIR/training_output.log"
 
-# Capture exit code from python, not tee
 TRAIN_EXIT_CODE=${PIPESTATUS[0]}
 
 echo ""
