@@ -7,7 +7,7 @@ data:
   features_path: "datasets/coco/features_karpathy"
   # Caption path: Using Karpathy JSON structure usually
   captions_path: "datasets/coco/caption_datasets/dataset_coco.json"
-  batch_size: 64
+  batch_size: 128
   num_workers: 4
   max_length: 50  # Max token length for DistilBERT (saves compute)
 
@@ -33,7 +33,7 @@ loss:
 # Training Configuration
 # ==========================================
 training:
-  epochs: 10
+  epochs: 20
   # CRITICAL: Separated learning rates to protect pre-trained BERT
   text_encoder_lr: 0.00002  # 2e-5 (Very small for BERT)
   head_lr: 0.001            # 1e-3 (Standard for Projection Heads)

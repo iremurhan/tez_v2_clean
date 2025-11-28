@@ -5,7 +5,7 @@ import logging
 import wandb
 import sys
 import os
-from transformers import AutoTokenizer
+from transformers import AutoTokenizer, get_cosine_schedule_with_warmup
 
 from src.data import get_dataloader
 from src.model import DualEncoder
@@ -81,16 +81,23 @@ def get_optimizer(model, config):
         
     return optimizer
 
-def get_scheduler(optimizer, config):
+def get_scheduler(optimizer, config, num_training_steps):
     """
     Factory function to create scheduler based on config.
+    Now supports Linear Warmup + Cosine Decay from Transformers.
     """
     sched_name = config['training']['scheduler'].lower()
     epochs = config['training']['epochs']
     
     if sched_name == 'cosine':
-        scheduler = torch.optim.lr_scheduler.CosineAnnealingLR(
-            optimizer, T_max=epochs, eta_min=1e-6
+        # Standard Transformer Scheduler: Linear Warmup + Cosine Decay
+        # Warmup is usually 10% of training steps
+        num_warmup_steps = int(0.1 * num_training_steps)
+        
+        scheduler = get_cosine_schedule_with_warmup(
+            optimizer, 
+            num_warmup_steps=num_warmup_steps, 
+            num_training_steps=num_training_steps
         )
     else:
         # Default or fallback
@@ -192,7 +199,10 @@ def main():
 
     # 7. Optimizer & Scheduler (Factory)
     optimizer = get_optimizer(model, config)
-    scheduler = get_scheduler(optimizer, config)
+    
+    # Calculate training steps for scheduler
+    num_training_steps = len(train_loader) * config['training']['epochs']
+    scheduler = get_scheduler(optimizer, config, num_training_steps)
 
     # 8. Trainer
     trainer = Trainer(

@@ -89,6 +89,7 @@ class Trainer:
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
+            self.scheduler.step()
             
             losses.update(loss.item(), images.size(0))
             
@@ -107,7 +108,6 @@ class Trainer:
                     except Exception as e:
                         logger.warning(f"Failed to log to W&B: {e}")
         
-        self.scheduler.step()
         return losses.avg
 
     @torch.no_grad()
