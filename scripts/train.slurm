@@ -72,7 +72,7 @@ cd /workspace
 # --override debug.debug_mode=true (Keep enabled for initial test)
 python3 -u train.py \
     --config config.yaml \
-    --override debug.debug_mode=true \
+    --override debug.debug_mode=false \
     2>&1 | tee "$LOGS_DIR/training_output.log"
 
 # Capture exit code from python, not tee
