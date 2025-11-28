@@ -161,7 +161,7 @@ class Trainer:
         # If start_epoch is 0 (i.e., not resuming), run initial evaluation.
         if start_epoch == 0:
             logger.info("Running initial evaluation at Epoch 0...")
-            score = self.evaluate(epoch=0) # Label as Epoch=0
+            score = self.evaluate(epoch=0)
             
             # At Epoch 0, only saving Last Model makes sense, not Best.
             # However, to simplify: If score > 0, let this be the first record.
@@ -172,36 +172,40 @@ class Trainer:
 
         # --- MAIN TRAINING LOOP ---
         for epoch in range(start_epoch, self.config['training']['epochs']):
+            # 1. Train one epoch
             train_loss = self.train_epoch(epoch)
             logger.info(f"Epoch {epoch+1} Training Loss: {train_loss:.4f}")
             
-            score = None
-            is_best_model = False
-
-            # --- 1. EVALUATION CONTROL ---
-            # Note: Using (epoch + 1) to match standard epoch counting (1, 2, 3...)
+            # Determine when to evaluate and save
             is_eval_time = ((epoch + 1) % eval_frequency == 0) or ((epoch + 1) == self.config['training']['epochs'])
-            
+            is_save_time = ((epoch + 1) % save_frequency == 0) or ((epoch + 1) == self.config['training']['epochs'])
+
+            # 2. EVALUATION & BEST MODEL CHECK
             if is_eval_time:
                 score = self.evaluate(epoch)
                 
+                # Check if this is a new best model
                 if score > self.best_r1:
-                    is_best_model = True
-                    self.best_r1 = score 
-            
-            # --- 2. SAVING CONTROL ---
-            is_save_time = ((epoch + 1) % save_frequency == 0) or ((epoch + 1) == self.config['training']['epochs'])
+                    self.best_r1 = score
+                    logger.info(f"New Best R@1: {score:.2f} found at Epoch {epoch+1}!")
+                    
+                    # Save best model immediately (independent of save_frequency)
+                    checkpoint = {
+                        'epoch': epoch + 1,
+                        'model_state_dict': self.model.state_dict(),
+                        'optimizer_state_dict': self.optimizer.state_dict(),
+                        'scheduler_state_dict': self.scheduler.state_dict(),
+                        'best_r1': self.best_r1,
+                        'config': self.config
+                    }
+                    
+                    best_name = f"best_model_ep{epoch+1}_r1_{score:.2f}.pth"
+                    torch.save(checkpoint, os.path.join(self.checkpoint_dir, best_name))
+                    torch.save(checkpoint, os.path.join(self.checkpoint_dir, "best_model.pth"))
+                    logger.info(f"Saved best model to {best_name}")
 
+            # 3. PERIODIC CHECKPOINT SAVE (Last Model)
             if is_save_time:
-                # If score not computed but needed for saving (eval_freq > save_freq case)
-                if score is None:
-                    logger.warning("Score not computed! Forcing evaluation to save checkpoint.")
-                    score = self.evaluate(epoch)
-                    is_best_model = (score > self.best_r1)
-                    if is_best_model:
-                        self.best_r1 = score
-
-                # Construct full checkpoint
                 checkpoint = {
                     'epoch': epoch + 1,
                     'model_state_dict': self.model.state_dict(),
@@ -210,20 +214,8 @@ class Trainer:
                     'best_r1': self.best_r1,
                     'config': self.config
                 }
-
-                # 3. Save Latest
+                
+                # Save latest checkpoint
                 last_path = os.path.join(self.checkpoint_dir, "last_model.pth")
                 torch.save(checkpoint, last_path)
-
-                # 4. Save Best
-                if is_best_model:
-                    checkpoint['best_r1'] = score 
-                    
-                    best_name = f"best_model_ep{epoch+1}_r1_{score:.2f}.pth"
-                    best_path = os.path.join(self.checkpoint_dir, best_name)
-                    torch.save(checkpoint, best_path)
-                    
-                    standard_best_path = os.path.join(self.checkpoint_dir, "best_model.pth")
-                    torch.save(checkpoint, standard_best_path)
-                    
-                    logger.info(f"New Best R@1: {score:.2f} | Saved to {best_name}")
+                logger.info(f"Checkpoint saved: last_model.pth (Epoch {epoch+1})")
