@@ -20,7 +20,7 @@
 #
 # 2. Raw Images & JSON Root: 
 #    Host: ~/experiments/datasets/coco -> Container: /data
-#    (Container içinde /data/train2014 ve /data/caption_datasets/dataset_coco.json olacak)
+#    (Container will have /data/train2014 and /data/caption_datasets/dataset_coco.json)
 #
 # 3. Output Destination:
 #    Host: ~/experiments/datasets/coco/features_karpathy -> Container: /output
@@ -30,11 +30,10 @@
 # ------------------------------------------------------------------
 # SETTINGS
 # ------------------------------------------------------------------
-WEIGHTS="scratch" # Baseline için 'scratch' (eğitilmemiş) veya 'imagenet'
+WEIGHTS="scratch"  # Options: 'scratch' (untrained) or 'imagenet' (pretrained)
 BS=256
 NW=8
-# Container içindeki path:
-JSON_PATH="/data/caption_datasets/dataset_coco.json"
+JSON_PATH="/data/caption_datasets/dataset_coco.json"  # Container path
 
 echo "Starting Feature Extraction inside Docker..."
 echo "Images Root: /data"

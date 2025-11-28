@@ -4,7 +4,7 @@
 # Data Configuration
 # ==========================================
 data:
-  features_path: "datasets/coco/features"
+  features_path: "datasets/coco/features_karpathy"
   # Caption path: Using Karpathy JSON structure usually
   captions_path: "datasets/coco/caption_datasets/dataset_coco.json"
   batch_size: 64
