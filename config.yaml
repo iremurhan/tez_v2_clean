@@ -61,7 +61,7 @@ augment:
   image:
     feature_jitter:
       enabled: true
-      std: 0.02
+      std: 0.05
 
 # ==========================================
 # Debug Configuration
