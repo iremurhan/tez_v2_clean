@@ -18,7 +18,7 @@
 # 1. Codebase
 # 2. Data (Images)
 # 3. Runs (Outputs)
-#SBATCH --container-mounts=/users/beyza.urhan/tez_v2_clean:/workspace,/users/beyza.urhan/experiments/datasets/coco:/workspace/datasets/coco,/users/beyza.urhan/experiments/runs:/output
+#SBATCH --container-mounts=/users/beyza.urhan/tez_v2_clean:/workspace,/users/beyza.urhan/experiments/datasets/cocofeatures_karpathy/resnet50_imagenet:/workspace/datasets/coco/features_karpathy,/users/beyza.urhan/experiments/runs:/output
 
 set -euo pipefail
 
