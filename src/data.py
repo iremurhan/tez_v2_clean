@@ -104,29 +104,20 @@ class CocoImageDataset(Dataset):
         
         # 1. Load Image
         image_path = os.path.join(self.images_root_path, sample['filepath'], sample['filename'])
-        
-        try:
-            image = Image.open(image_path).convert('RGB')
-        except (OSError, FileNotFoundError) as e:
-            # Handle missing images gracefully (though dataset should be clean)
-            logger.error(f"Failed to load image {image_path}: {e}. Using black image.")
-            image = Image.new('RGB', (224, 224))
+        image = Image.open(image_path).convert('RGB')
 
         # 2. Apply Transforms
-        # View 1: Standard View
         img_tensor = self.transform(image)
         
-        # View 2: Augmented View (For Intra-Modal Learning)
-        # Only generated if explicitly requested (usually only for training)
+        # 3. Generate Augmented View (if enabled for intra-modal learning)
         if self.intra_modal_aug:
-            # Re-apply train transform to get a different view
             img_aug_tensor = self.transform(image)
         else:
             # If not augmenting, just return a copy or zero tensor
             # Returning a clone ensures valid tensor shape
             img_aug_tensor = img_tensor.clone()
 
-        # 3. Tokenize Text
+        # 4. Tokenize Text
         tokenized = self.tokenizer(
             caption,
             padding='max_length',

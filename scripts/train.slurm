@@ -14,7 +14,7 @@
 # ------------------------------------------------------------------
 # PATH MAPPING
 # ------------------------------------------------------------------
-#SBATCH --container-mounts=/users/beyza.urhan/tez_v2_clean:/workspace,/users/beyza.urhan/experiments/datasets/coco/features_karpathy/resnet50_imagenet:/workspace/datasets/coco/features_karpathy,/users/beyza.urhan/experiments/datasets/coco/caption_datasets:/workspace/datasets/coco/caption_datasets,/users/beyza.urhan/experiments/runs:/output,/users/beyza.urhan/experiments/env:/env
+#SBATCH --container-mounts=/users/beyza.urhan/tez_v2_clean:/workspace,/users/beyza.urhan/experiments/datasets/coco:/workspace/datasets/coco,/users/beyza.urhan/experiments/datasets/coco/caption_datasets:/workspace/datasets/coco/caption_datasets,/users/beyza.urhan/experiments/runs:/output,/users/beyza.urhan/experiments/env:/env
 
 # Pass W&B Env vars if they exist in the shell context
 #SBATCH --container-env=WANDB_API_KEY,WANDB_MODE
