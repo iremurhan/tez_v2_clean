@@ -184,6 +184,9 @@ class Trainer:
             is_eval_time = ((epoch + 1) % eval_frequency == 0) or ((epoch + 1) == self.config['training']['epochs'])
             is_save_time = ((epoch + 1) % save_frequency == 0) or ((epoch + 1) == self.config['training']['epochs'])
 
+            # Ensure checkpoint directory exists before any save operation
+            os.makedirs(self.checkpoint_dir, exist_ok=True)
+
             # 2. EVALUATION & BEST MODEL CHECK
             if is_eval_time:
                 score = self.evaluate(epoch)
@@ -203,10 +206,10 @@ class Trainer:
                         'config': self.config
                     }
                     
-                    best_name = f"best_model_ep{epoch+1}_r1_{score:.2f}.pth"
-                    torch.save(checkpoint, os.path.join(self.checkpoint_dir, best_name))
-                    torch.save(checkpoint, os.path.join(self.checkpoint_dir, "best_model.pth"))
-                    logger.info(f"Saved best model to {best_name}")
+                    # Overwrite best_model.pth (no epoch/score in filename to save disk)
+                    best_path = os.path.join(self.checkpoint_dir, "best_model.pth")
+                    torch.save(checkpoint, best_path)
+                    logger.info(f"Saved best model to {best_path}")
 
             # 3. PERIODIC CHECKPOINT SAVE (Last Model)
             if is_save_time:
@@ -219,7 +222,6 @@ class Trainer:
                     'config': self.config
                 }
                 
-                # Save latest checkpoint
                 last_path = os.path.join(self.checkpoint_dir, "last_model.pth")
                 torch.save(checkpoint, last_path)
-                logger.info(f"Checkpoint saved: last_model.pth (Epoch {epoch+1})")
+                logger.info(f"Checkpoint saved: last_model.pth")
