@@ -7,8 +7,8 @@ data:
   features_path: "datasets/coco/features_karpathy"
   # Caption path: Using Karpathy JSON structure usually
   captions_path: "datasets/coco/caption_datasets/dataset_coco.json"
-  batch_size: 256
-  num_workers: 4
+  batch_size: 512
+  num_workers: 8
   max_length: 50  # Max token length for DistilBERT (saves compute)
 
 # ==========================================
@@ -35,13 +35,13 @@ loss:
 training:
   epochs: 40
   # CRITICAL: Separated learning rates to protect pre-trained BERT
-  text_encoder_lr: 0.00002  # 2e-5 (Very small for BERT)
+  text_encoder_lr: 0.00003  # 2e-5 (Very small for BERT)
   head_lr: 0.001            # 1e-3 (Standard for Projection Heads)
   seed: 42
   optimizer: "adamw"        # AdamW is better for Transformers
-  weight_decay: 0.0001
+  weight_decay: 0.0005
   scheduler: "cosine"
-  warmup_epochs: 1          # 1 epoch warmup is sufficient
+  warmup_epochs: 2          # 1 epoch warmup is sufficient
 
 # ==========================================
 # Logging Configuration
