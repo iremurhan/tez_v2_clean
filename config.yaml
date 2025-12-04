@@ -36,15 +36,15 @@ loss:
 training:
   epochs: 20
 
-  image_encoder_lr: 0.00002
-  text_encoder_lr: 0.00002  # 2e-5 (Very small for BERT)
-  head_lr: 0.001            # 1e-3 (Standard for Projection Heads)
+  image_encoder_lr: 0.00005
+  text_encoder_lr: 0.00005  # 2e-5 (Very small for BERT)
+  head_lr: 0.0001            # 1e-3 (Standard for Projection Heads)
 
   seed: 42
   optimizer: "adamw"        # AdamW is better for Transformers
-  weight_decay: 0.0001
+  weight_decay: 0.01
   scheduler: "cosine"
-  warmup_epochs: 1          # 1 epoch warmup is sufficient
+  warmup_epochs: 2          # 1 epoch warmup is sufficient
 
 # ==========================================
 # Logging Configuration
