@@ -5,7 +5,7 @@
 #SBATCH --job-name=cmr-train
 #SBATCH --output=/users/beyza.urhan/experiments/runs/%j/slurm.log
 #SBATCH --error=/users/beyza.urhan/experiments/runs/%j/err.log
-#SBATCH --time=14:00:00
+#SBATCH --time=14-00:00:00
 #SBATCH --gpus=1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=40G
@@ -14,9 +14,9 @@
 # ------------------------------------------------------------------
 # PATH MAPPING
 # ------------------------------------------------------------------
-#SBATCH --container-mounts=/users/beyza.urhan/tez_v2_clean:/workspace,/users/beyza.urhan/experiments/datasets/coco/features_karpathy/resnet50_imagenet:/workspace/datasets/coco/features_karpathy,/users/beyza.urhan/experiments/datasets/coco/caption_datasets:/workspace/datasets/coco/caption_datasets,/users/beyza.urhan/experiments/runs:/output,/users/beyza.urhan/experiments/env:/env
+#SBATCH --container-mounts=/users/beyza.urhan/tez_v2_clean:/workspace,/users/beyza.urhan/experiments/datasets/coco:/workspace/datasets/coco,/users/beyza.urhan/experiments/datasets/coco/caption_datasets:/workspace/datasets/coco/caption_datasets,/users/beyza.urhan/experiments/runs:/output,/users/beyza.urhan/experiments/env:/env
 
-# Pass W&B Env vars if they exist in the shell context
+# Pass W&B Env vars
 #SBATCH --container-env=WANDB_API_KEY,WANDB_MODE
 
 set -euo pipefail
@@ -38,34 +38,36 @@ echo "=========================================="
 echo "Job ID:        ${SLURM_JOB_ID}"
 echo "Experiment:    ${EXP_NAME:-}"
 echo "Job Directory: ${JOB_DIR}"
+echo "Checkpoints:   ${CKPT_DIR}"
 echo "=========================================="
 
 # ------------------------------------------------------------------
-# W&B SETUP (ONLINE/OFFLINE AUTO-DETECT)
+# W&B SETUP
 # ------------------------------------------------------------------
-# Always save logs to our specific folder
 export WANDB_DIR="$LOGS_DIR"
 
 # Load W&B Env file if mounted
 if [ -f /env/wandb.env ]; then
-    echo "✓ Loading W&B credentials from /env/wandb.env"
-    # Source the file and export variables
-    set -a  # Automatically export all variables
-    source /env/wandb.env
-    set +a
+    set -a; source /env/wandb.env; set +a
 fi
 
-# Check if API key is available
+# Configure W&B mode based on API key
 if [ -n "${WANDB_API_KEY:-}" ]; then
-    echo "✓ W&B API Key found."
     export WANDB_MODE=online
+    # Match W&B run name with SLURM job
+    export WANDB_NAME="${SLURM_JOB_ID}${EXP_NAME:+_${EXP_NAME}}"
 else
     echo "W&B API Key not found. Switching to OFFLINE mode."
     export WANDB_MODE=offline
 fi
 
+# Update SLURM job name if experiment name provided
+if [ -n "$EXP_NAME" ]; then
+    scontrol update jobid=$SLURM_JOB_ID JobName=$EXP_NAME
+fi
+
 # ------------------------------------------------------------------
-# METADATA & CONFIG
+# METADATA
 # ------------------------------------------------------------------
 echo "Job ID: ${SLURM_JOB_ID}" > "$META_DIR/experiment_metadata.txt"
 echo "Experiment: ${EXP_NAME:-(Unnamed)}" >> "$META_DIR/experiment_metadata.txt"
@@ -73,28 +75,21 @@ echo "Date: $(date)" >> "$META_DIR/experiment_metadata.txt"
 
 if [ -f /workspace/config.yaml ]; then
     cp /workspace/config.yaml "$META_DIR/config_saved.yaml"
-    echo "✓ Config backed up."
 fi
 
 # ------------------------------------------------------------------
-# CHECKPOINT SETUP
-# ------------------------------------------------------------------
-rm -rf /workspace/checkpoints
-ln -s "$CKPT_DIR" /workspace/checkpoints
-echo "✓ Checkpoints linked to: $CKPT_DIR"
-
-# ------------------------------------------------------------------
-# START TRAINING
+# START TRAINING (Direct Path Method)
 # ------------------------------------------------------------------
 echo "Starting training..."
-echo ""
 
 cd /workspace
 
 # PRODUCTION RUN (Debug Mode FALSE)
 python3 -u train.py \
     --config config.yaml \
-    --override debug.debug_mode=false \
+    --override \
+        debug.debug_mode=false \
+        logging.checkpoint_dir="$CKPT_DIR" \
     2>&1 | tee "$LOGS_DIR/training_output.log"
 
 TRAIN_EXIT_CODE=${PIPESTATUS[0]}
