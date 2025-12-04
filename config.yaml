@@ -19,7 +19,7 @@ model:
   image_dim: 2048        # ResNet feature dimension (Pool5)
   text_model_name: "distilbert-base-uncased" # HuggingFace model ID
   text_dim: 768          # DistilBERT output dimension
-  embed_dim: 256         # Joint embedding space (Start small for speed)
+  embed_dim: 512         # Joint embedding space (Start small for speed)
   dropout: 0.1           # Dropout probability for projection heads
 
 # ==========================================
