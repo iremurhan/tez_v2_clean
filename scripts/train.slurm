@@ -5,7 +5,7 @@
 #SBATCH --job-name=cmr-train
 #SBATCH --output=/users/beyza.urhan/experiments/runs/%j/slurm.log
 #SBATCH --error=/users/beyza.urhan/experiments/runs/%j/err.log
-#SBATCH --time=14:00:00
+#SBATCH --time=14-00:00:00
 #SBATCH --gpus=1
 #SBATCH --cpus-per-gpu=8
 #SBATCH --mem-per-gpu=40G
