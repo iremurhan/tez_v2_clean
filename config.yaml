@@ -4,17 +4,18 @@
 # Data Configuration
 # ==========================================
 data:
-  features_path: "datasets/coco/features_karpathy"
+  images_path: "datasets/coco"
   # Caption path: Using Karpathy JSON structure usually
   captions_path: "datasets/coco/caption_datasets/dataset_coco.json"
-  batch_size: 256
-  num_workers: 4
+  batch_size: 128
+  num_workers: 8
   max_length: 50  # Max token length for DistilBERT (saves compute)
 
 # ==========================================
 # Model Architecture
 # ==========================================
 model:
+  image_model_name: "resnet50"
   image_dim: 2048        # ResNet feature dimension (Pool5)
   text_model_name: "distilbert-base-uncased" # HuggingFace model ID
   text_dim: 768          # DistilBERT output dimension
@@ -26,22 +27,24 @@ model:
 # ==========================================
 loss:
   temperature: 0.07      # For Contrastive Loss (InfoNCE)
-  intra_img_weight: 0.5  # Weight for Intra-modal structure loss (Image-to-Image)
-  intra_txt_weight: 0.5  # Weight for Intra-modal structure loss (Text-to-Text)
+  intra_img_weight: 1  # Weight for Intra-modal structure loss (Image-to-Image)
+  intra_txt_weight: 1  # Weight for Intra-modal structure loss (Text-to-Text)
 
 # ==========================================
 # Training Configuration
 # ==========================================
 training:
-  epochs: 40
-  # CRITICAL: Separated learning rates to protect pre-trained BERT
-  text_encoder_lr: 0.00002  # 2e-5 (Very small for BERT)
-  head_lr: 0.001            # 1e-3 (Standard for Projection Heads)
+  epochs: 20
+
+  image_encoder_lr: 0.00005
+  text_encoder_lr: 0.00005  # 2e-5 (Very small for BERT)
+  head_lr: 0.0001            # 1e-3 (Standard for Projection Heads)
+
   seed: 42
   optimizer: "adamw"        # AdamW is better for Transformers
-  weight_decay: 0.0001
+  weight_decay: 0.01
   scheduler: "cosine"
-  warmup_epochs: 1          # 1 epoch warmup is sufficient
+  warmup_epochs: 2          # 1 epoch warmup is sufficient
 
 # ==========================================
 # Logging Configuration
@@ -59,9 +62,7 @@ logging:
 # ==========================================
 augment:
   image:
-    feature_jitter:
       enabled: true
-      std: 0.05
 
 # ==========================================
 # Debug Configuration

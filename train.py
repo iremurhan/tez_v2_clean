@@ -52,34 +52,43 @@ def setup_logging(save_dir):
 
 def get_optimizer(model, config):
     """
-    Factory function to create optimizer based on config.
+    Factory function to create optimizer with 3 parameter groups.
     """
     opt_name = config['training']['optimizer'].lower()
-    lr_backbone = float(config['training']['text_encoder_lr'])
-    lr_head = float(config['training']['head_lr'])
-    weight_decay = float(config['training']['weight_decay'])
+    wd = float(config['training']['weight_decay'])
     
-    # Separate parameters
+
+    lr_img = float(config['training']['image_encoder_lr'])
+    lr_txt = float(config['training']['text_encoder_lr'])
+    lr_head = float(config['training']['head_lr'])
+    
     param_optimizer = list(model.named_parameters())
     
-    # Filter out frozen parameters if any (though usually we train all)
+
     optimizer_grouped_parameters = [
-        # Text Backbone (Low LR)
-        {'params': [p for n, p in param_optimizer if 'text_backbone' in n], 
-         'lr': lr_backbone},
-        # Heads & Image Proj (High LR)
-        {'params': [p for n, p in param_optimizer if 'text_backbone' not in n], 
-         'lr': lr_head}
+        # 1. Image Backbone (ResNet) -> Low LR
+        {
+            'params': [p for n, p in param_optimizer if 'image_backbone' in n and p.requires_grad],
+            'lr': lr_img
+        },
+        # 2. Text Backbone (BERT) -> Low LR
+        {
+            'params': [p for n, p in param_optimizer if 'text_backbone' in n and p.requires_grad],
+            'lr': lr_txt
+        },
+        # 3. Heads (Projections) -> High LR
+        {
+            'params': [p for n, p in param_optimizer if 'backbone' not in n and p.requires_grad],
+            'lr': lr_head
+        }
     ]
     
     if opt_name == 'adamw':
-        optimizer = torch.optim.AdamW(optimizer_grouped_parameters, weight_decay=weight_decay)
+        return torch.optim.AdamW(optimizer_grouped_parameters, weight_decay=wd)
     elif opt_name == 'adam':
-        optimizer = torch.optim.Adam(optimizer_grouped_parameters, weight_decay=weight_decay)
+        return torch.optim.Adam(optimizer_grouped_parameters, weight_decay=wd)
     else:
         raise ValueError(f"Unsupported optimizer: {opt_name}")
-        
-    return optimizer
 
 def get_scheduler(optimizer, config, num_training_steps):
     """
