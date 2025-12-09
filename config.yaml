@@ -15,11 +15,11 @@ data:
 # Model Architecture
 # ==========================================
 model:
-  image_model_name: "resnet50"
-  image_dim: 2048        # ResNet feature dimension (Pool5)
+  image_model_name: "google/vit-base-patch16-224-in21k"  # ViT Base (ImageNet-21k pretrained)
+  image_dim: 768         # ViT Base output dimension (dynamic, but kept for reference)
   text_model_name: "distilbert-base-uncased" # HuggingFace model ID
   text_dim: 768          # DistilBERT output dimension
-  embed_dim: 512         # Joint embedding space (Start small for speed)
+  embed_dim: 256         # Joint embedding space
   dropout: 0.1           # Dropout probability for projection heads
 
 # ==========================================
