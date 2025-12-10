@@ -1,128 +1,146 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
-from transformers import AutoModel, ViTModel
-
-
-class ImageEncoder(nn.Module):
-    """
-    Image Encoder using Vision Transformer (ViT).
-    Uses HuggingFace 'ViTModel' to extract global image features.
-    """
-    def __init__(self, model_name: str):
-        super().__init__()
-        
-        print(f"Loading Image Encoder: {model_name} (ViT)...")
-        # Load Pretrained ViT (e.g., 'google/vit-base-patch16-224-in21k')
-        self.backbone = ViTModel.from_pretrained(model_name)
-        
-        # Dynamic Feature Dimension (Usually 768 for ViT-Base)
-        self.feature_dim = self.backbone.config.hidden_size
-        
-        # Freezing Strategy (Optional - Start with full fine-tuning or freeze lower layers)
-        # For now, let's keep it fully trainable or freeze just embeddings
-        # self._freeze_lower_layers() 
-
-    def _freeze_lower_layers(self):
-        # Example: Freeze embeddings and first 6 layers
-        for param in self.backbone.embeddings.parameters():
-            param.requires_grad = False
-        for layer in self.backbone.encoder.layer[:6]:
-            for param in layer.parameters():
-                param.requires_grad = False
-
-    def forward(self, images):
-        """
-        Args:
-            images: [Batch, 3, 224, 224] - Standard normalized tensors
-        Returns:
-            cls_token: [Batch, feature_dim]
-        """
-        # HuggingFace ViT expects 'pixel_values' argument
-        outputs = self.backbone(pixel_values=images)
-        
-        # Take the [CLS] token (first token of the last hidden state)
-        # Shape: [Batch, SeqLen, Dim] -> [Batch, Dim]
-        return outputs.last_hidden_state[:, 0, :]
-
-
-class TextEncoder(nn.Module):
-    """
-    Text Encoder using DistilBERT (or any BERT-like model).
-    """
-    def __init__(self, model_name: str):
-        super().__init__()
-        
-        print(f"Loading Text Encoder: {model_name}...")
-        self.backbone = AutoModel.from_pretrained(model_name)
-        self.feature_dim = self.backbone.config.hidden_size
-    
-    def forward(self, input_ids, attention_mask):
-        output = self.backbone(input_ids=input_ids, attention_mask=attention_mask)
-        # Return [CLS] token
-        return output.last_hidden_state[:, 0, :]
+from transformers import CLIPModel
 
 
 class DualEncoder(nn.Module):
     """
-    Dual Encoder architecture with ViT + DistilBERT.
+    Dual Encoder using OpenAI CLIP (clip-vit-base-patch32).
+    
+    CLIP is pre-trained on 400M image-text pairs from the internet,
+    providing extremely strong visual-semantic representations.
+    
+    Strategy:
+    - Freeze CLIP backbone (vision + text encoders)
+    - Train only projection layers for domain adaptation
     """
+    
     def __init__(self, config):
         super().__init__()
         
         self.embed_dim = config['model']['embed_dim']
         self.dropout_p = config['model'].get('dropout', 0.1)
         
-        # 1. Initialize Encoders
-        # Get model names from config
-        img_model_name = config['model'].get('image_model_name', 'google/vit-base-patch16-224-in21k')
-        txt_model_name = config['model']['text_model_name']
+        # 1. Load CLIP Model
+        clip_model_name = config['model'].get('image_model_name', 'openai/clip-vit-base-patch32')
+        print(f"Loading CLIP Model: {clip_model_name}...")
+        self.clip = CLIPModel.from_pretrained(clip_model_name)
         
-        self.image_encoder = ImageEncoder(img_model_name)
-        self.text_encoder = TextEncoder(txt_model_name)
+        # Get CLIP's projection dimension (usually 512 for base models)
+        self.clip_embed_dim = self.clip.config.projection_dim
+        print(f"CLIP Projection Dimension: {self.clip_embed_dim}")
         
-        # 2. Get Dynamic Dimensions
-        image_in_dim = self.image_encoder.feature_dim
-        text_in_dim = self.text_encoder.feature_dim
+        # 2. Freezing Strategy - Freeze backbone, train projections
+        self._apply_freezing_strategy()
         
-        print(f"Feature Dimensions -> Image: {image_in_dim}, Text: {text_in_dim}")
+        # 3. Optional: Additional projection head to match our embed_dim
+        # If CLIP's output (512) != our target embed_dim (256), add a small MLP
+        if self.clip_embed_dim != self.embed_dim:
+            print(f"Adding projection: {self.clip_embed_dim} -> {self.embed_dim}")
+            self.image_proj = nn.Sequential(
+                nn.Linear(self.clip_embed_dim, self.embed_dim),
+                nn.BatchNorm1d(self.embed_dim),
+                nn.ReLU(),
+                nn.Dropout(self.dropout_p),
+            )
+            self.text_proj = nn.Sequential(
+                nn.Linear(self.clip_embed_dim, self.embed_dim),
+                nn.BatchNorm1d(self.embed_dim),
+                nn.ReLU(),
+                nn.Dropout(self.dropout_p),
+            )
+            self._init_head_weights()
+        else:
+            self.image_proj = None
+            self.text_proj = None
+    
+    def _apply_freezing_strategy(self):
+        """
+        Freeze CLIP backbone, unfreeze projection layers.
         
-        # 3. Projection Heads
-        # ViT output is already a flat vector [Batch, 768], so no Flatten needed unlike ResNet
-        self.image_proj = nn.Sequential(
-            nn.Linear(image_in_dim, text_in_dim), 
-            nn.BatchNorm1d(text_in_dim),
-            nn.ReLU(),
-            nn.Dropout(self.dropout_p),
-            nn.Linear(text_in_dim, self.embed_dim)
-        )
-
-        self.text_proj = nn.Sequential(
-            nn.Linear(text_in_dim, text_in_dim),
-            nn.BatchNorm1d(text_in_dim),
-            nn.ReLU(),
-            nn.Dropout(self.dropout_p),
-            nn.Linear(text_in_dim, self.embed_dim)
-        )
+        CLIP architecture:
+        - vision_model: ViT encoder (frozen)
+        - text_model: Transformer encoder (frozen)
+        - visual_projection: Linear layer (trainable)
+        - text_projection: Linear layer (trainable)
+        """
+        # First, freeze everything
+        for param in self.clip.parameters():
+            param.requires_grad = False
         
-        self._init_head_weights()
-
+        # Unfreeze CLIP's projection layers for fine-tuning
+        for param in self.clip.visual_projection.parameters():
+            param.requires_grad = True
+        for param in self.clip.text_projection.parameters():
+            param.requires_grad = True
+        
+        # Print summary
+        self._print_freezing_summary()
+    
+    def _print_freezing_summary(self):
+        """Print trainable parameter summary."""
+        total_params = sum(p.numel() for p in self.clip.parameters())
+        trainable_params = sum(p.numel() for p in self.clip.parameters() if p.requires_grad)
+        
+        print(f"  CLIP: {trainable_params:,} trainable / {total_params:,} total params")
+        print(f"  Frozen: Vision Encoder, Text Encoder | Unfrozen: Projections")
+    
     def _init_head_weights(self):
+        """Initialize additional projection heads."""
         for proj in [self.image_proj, self.text_proj]:
-            for m in proj.modules():
-                if isinstance(m, nn.Linear):
-                    nn.init.xavier_uniform_(m.weight)
-                    if m.bias is not None:
-                        nn.init.constant_(m.bias, 0)
+            if proj is not None:
+                for m in proj.modules():
+                    if isinstance(m, nn.Linear):
+                        nn.init.xavier_uniform_(m.weight)
+                        if m.bias is not None:
+                            nn.init.constant_(m.bias, 0)
 
     def forward(self, images, input_ids, attention_mask):
-        # Image Pathway
-        img_feat = self.image_encoder(images)
-        img_emb = self.image_proj(img_feat)
+        """
+        Forward pass returning L2-normalized embeddings.
         
-        # Text Pathway
-        txt_cls = self.text_encoder(input_ids, attention_mask)
-        txt_emb = self.text_proj(txt_cls)
+        Args:
+            images: [Batch, 3, 224, 224] - Pixel values
+            input_ids: [Batch, SeqLen] - Tokenized text
+            attention_mask: [Batch, SeqLen] - Attention mask
+            
+        Returns:
+            img_embeds: [Batch, embed_dim] - L2 normalized image embeddings
+            txt_embeds: [Batch, embed_dim] - L2 normalized text embeddings
+        """
+        # Get CLIP embeddings (already projected)
+        # Note: CLIP expects 'pixel_values' for images
+        image_embeds = self.clip.get_image_features(pixel_values=images)
+        text_embeds = self.clip.get_text_features(input_ids=input_ids, attention_mask=attention_mask)
         
-        # Normalization
-        return F.normalize(img_emb, p=2, dim=1), F.normalize(txt_emb, p=2, dim=1)
+        # Optional: Additional projection to match target embed_dim
+        if self.image_proj is not None:
+            image_embeds = self.image_proj(image_embeds)
+            text_embeds = self.text_proj(text_embeds)
+        
+        # L2 Normalization (critical for contrastive learning)
+        image_embeds = F.normalize(image_embeds, p=2, dim=1)
+        text_embeds = F.normalize(text_embeds, p=2, dim=1)
+        
+        return image_embeds, text_embeds
+    
+    def forward_with_clip_loss(self, images, input_ids, attention_mask):
+        """
+        Alternative forward that returns CLIP's built-in contrastive loss.
+        
+        Use this if you want to bypass custom loss function.
+        Note: This ignores our additional projection heads.
+        
+        Returns:
+            loss: Scalar contrastive loss computed by CLIP
+            logits_per_image: [Batch, Batch] similarity matrix
+            logits_per_text: [Batch, Batch] similarity matrix (transposed)
+        """
+        outputs = self.clip(
+            input_ids=input_ids,
+            attention_mask=attention_mask,
+            pixel_values=images,
+            return_loss=True
+        )
+        return outputs.loss, outputs.logits_per_image, outputs.logits_per_text

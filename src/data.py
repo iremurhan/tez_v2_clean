@@ -37,8 +37,12 @@ class CocoImageDataset(Dataset):
         
         # Define Transforms
         if transform is None:
-            # The values are from the ImageNet dataset
-            normalize = transforms.Normalize(mean=[0.485, 0.456, 0.406], std=[0.229, 0.224, 0.225])
+            # CLIP normalization values (different from ImageNet!)
+            # Source: https://github.com/openai/CLIP/blob/main/clip/clip.py
+            normalize = transforms.Normalize(
+                mean=[0.48145466, 0.4578275, 0.40821073],
+                std=[0.26862954, 0.26130258, 0.27577711]
+            )
             
             if split == 'train':
                 self.transform = transforms.Compose([

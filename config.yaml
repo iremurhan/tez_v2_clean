@@ -9,18 +9,20 @@ data:
   captions_path: "datasets/coco/caption_datasets/dataset_coco.json"
   batch_size: 64
   num_workers: 8
-  max_length: 50  # Max token length for DistilBERT (saves compute)
+  max_length: 77  # Max token length for CLIP (CLIP's default context length)
 
 # ==========================================
 # Model Architecture
 # ==========================================
 model:
-  image_model_name: "google/vit-base-patch16-224-in21k"  # ViT Base (ImageNet-21k pretrained)
-  image_dim: 768         # ViT Base output dimension (dynamic, but kept for reference)
-  text_model_name: "distilbert-base-uncased" # HuggingFace model ID
-  text_dim: 768          # DistilBERT output dimension
-  embed_dim: 256         # Joint embedding space
-  dropout: 0.1           # Dropout probability for projection heads
+  # CLIP Model: Pre-trained on 400M image-text pairs
+  image_model_name: "openai/clip-vit-base-patch32"  # CLIP ViT-B/32
+  # Note: text_model_name is ignored when using CLIP (CLIP has its own text encoder)
+  text_model_name: "openai/clip-vit-base-patch32"   # Kept for compatibility
+  image_dim: 512         # CLIP projection dimension (reference only)
+  text_dim: 512          # CLIP projection dimension (reference only)
+  embed_dim: 256         # Final embedding space (additional projection)
+  dropout: 0.1           # Dropout for additional projection heads
 
 # ==========================================
 # Loss Configuration (Inter + Intra)
@@ -34,17 +36,15 @@ loss:
 # Training Configuration
 # ==========================================
 training:
-  epochs: 40
-  # CRITICAL: Separated learning rates to protect pre-trained BERT
-  image_encoder_lr: 0.00002  # 2e-5 (Very small for ResNet)
-  text_encoder_lr: 0.00002  # 2e-5 (Very small for BERT)
-  head_lr: 0.001            # 1e-3 (Standard for Projection Heads)
+  epochs: 20
+  # CLIP Fine-tuning Learning Rates
+  clip_projection_lr: 0.00001  # 1e-5 (CLIP's projection layers)
+  head_lr: 0.0005              # 5e-4 (Custom projection heads)
   seed: 42
-  optimizer: "adamw"        # AdamW is better for Transformers
-  weight_decay: 0.0005
+  optimizer: "adamw"           # AdamW is better for Transformers
+  weight_decay: 0.01           # Higher weight decay for CLIP
   scheduler: "cosine"
-  warmup_epochs: 2          # 1 epoch warmup is sufficient
-  warmup_epochs: 2          # 1 epoch warmup is sufficient
+  warmup_epochs: 2
 
 # ==========================================
 # Logging Configuration
@@ -53,8 +53,8 @@ logging:
   use_wandb: true
   wandb_project: "coco-retrieval-thesis"
   log_freq: 500              # Log every 500 batches to see progress
-  eval_freq: 2              # Evaluate every 2 epochs
-  save_freq: 5              # Save checkpoint every 5 epochs
+  eval_freq: 1              # Evaluate every 1 epochs
+  save_freq: 3              # Save checkpoint every 3 epochs
   checkpoint_dir: "checkpoints"
 
 # ==========================================

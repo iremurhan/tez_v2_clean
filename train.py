@@ -5,7 +5,7 @@ import logging
 import wandb
 import sys
 import os
-from transformers import AutoTokenizer, get_cosine_schedule_with_warmup
+from transformers import CLIPTokenizer, get_cosine_schedule_with_warmup
 
 from src.data import get_dataloader
 from src.model import DualEncoder
@@ -52,36 +52,45 @@ def setup_logging(save_dir):
 
 def get_optimizer(model, config):
     """
-    Factory function to create optimizer with 3 parameter groups.
+    Factory function to create optimizer with parameter groups for CLIP.
+    
+    CLIP Parameter Groups:
+    1. CLIP Projections (visual_projection, text_projection) - Medium LR
+    2. Additional Projection Heads (image_proj, text_proj) - High LR
     """
     opt_name = config['training']['optimizer'].lower()
     wd = float(config['training']['weight_decay'])
     
-
-    lr_img = float(config['training']['image_encoder_lr'])
-    lr_txt = float(config['training']['text_encoder_lr'])
+    # Learning rates
+    lr_clip_proj = float(config['training'].get('clip_projection_lr', 1e-5))
     lr_head = float(config['training']['head_lr'])
     
     param_optimizer = list(model.named_parameters())
     
-
     optimizer_grouped_parameters = [
-        # 1. Image Backbone (ResNet) -> Low LR
+        # 1. CLIP's Projection Layers (visual_projection, text_projection)
         {
-            'params': [p for n, p in param_optimizer if 'image_backbone' in n and p.requires_grad],
-            'lr': lr_img
+            'params': [p for n, p in param_optimizer 
+                      if ('visual_projection' in n or 'text_projection' in n) and p.requires_grad],
+            'lr': lr_clip_proj,
+            'name': 'clip_projections'
         },
-        # 2. Text Backbone (BERT) -> Low LR
+        # 2. Additional Projection Heads (image_proj, text_proj)
         {
-            'params': [p for n, p in param_optimizer if 'text_backbone' in n and p.requires_grad],
-            'lr': lr_txt
-        },
-        # 3. Heads (Projections) -> High LR
-        {
-            'params': [p for n, p in param_optimizer if 'backbone' not in n and p.requires_grad],
-            'lr': lr_head
+            'params': [p for n, p in param_optimizer 
+                      if ('image_proj' in n or 'text_proj' in n) and 'clip' not in n and p.requires_grad],
+            'lr': lr_head,
+            'name': 'custom_heads'
         }
     ]
+    
+    # Filter out empty groups
+    optimizer_grouped_parameters = [g for g in optimizer_grouped_parameters if len(g['params']) > 0]
+    
+    # Log parameter counts
+    for group in optimizer_grouped_parameters:
+        total_params = sum(p.numel() for p in group['params'])
+        logging.info(f"Optimizer Group '{group.get('name', 'unnamed')}': {total_params:,} params, lr={group['lr']}")
     
     if opt_name == 'adamw':
         return torch.optim.AdamW(optimizer_grouped_parameters, weight_decay=wd)
@@ -188,7 +197,11 @@ def main():
 
     # 5. Data Loaders
     logger.info("Initializing Data Loaders...")
-    tokenizer = AutoTokenizer.from_pretrained(config['model']['text_model_name'])
+    
+    # CLIP Tokenizer (different from DistilBERT!)
+    clip_model_name = config['model'].get('image_model_name', 'openai/clip-vit-base-patch32')
+    logger.info(f"Loading CLIP Tokenizer from: {clip_model_name}")
+    tokenizer = CLIPTokenizer.from_pretrained(clip_model_name)
     
     train_loader = get_dataloader(config, tokenizer, split='train')
     
