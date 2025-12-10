@@ -7,7 +7,7 @@ data:
   images_path: "datasets/coco"
   # Caption path: Using Karpathy JSON structure usually
   captions_path: "datasets/coco/caption_datasets/dataset_coco.json"
-  batch_size: 512
+  batch_size: 128
   num_workers: 8
   max_length: 50  # Max token length for DistilBERT (saves compute)
 
