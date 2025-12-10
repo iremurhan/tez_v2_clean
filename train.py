@@ -55,43 +55,51 @@ def get_optimizer(model, config):
     Factory function to create optimizer with parameter groups for CLIP.
     
     CLIP Parameter Groups:
-    1. CLIP Projections (visual_projection, text_projection) - Medium LR
-    2. Additional Projection Heads (image_proj, text_proj) - High LR
+    1. Backbone (vision_model, text_model) - Very low LR or frozen (0)
+    2. CLIP Projections (visual_projection, text_projection) - Low LR
+    3. Custom Projection Heads (image_proj, text_proj) - Higher LR
     """
     opt_name = config['training']['optimizer'].lower()
     wd = float(config['training']['weight_decay'])
     
-    # Learning rates
+    # Learning Rates from Config
     lr_clip_proj = float(config['training'].get('clip_projection_lr', 1e-5))
-    lr_head = float(config['training']['head_lr'])
+    lr_head = float(config['training'].get('head_lr', 1e-3))
+    # Optional: If backbone is unfrozen later
+    lr_backbone = float(config['training'].get('backbone_lr', 1e-6))
     
-    param_optimizer = list(model.named_parameters())
+    # Get only trainable (requires_grad=True) parameters
+    trainable_params = [(n, p) for n, p in model.named_parameters() if p.requires_grad]
     
+    # Define Groups
+    clip_proj_params = []   # CLIP's original projections
+    custom_head_params = [] # Your custom Linear layers (if any)
+    backbone_params = []    # If backbone is unfrozen, falls here
+    
+    for n, p in trainable_params:
+        # 1. CLIP Projection Layers (visual_projection, text_projection)
+        if 'visual_projection' in n or 'text_projection' in n:
+            clip_proj_params.append(p)
+        # 2. Custom Heads (image_proj, text_proj - defined in model.py)
+        elif 'image_proj' in n or 'text_proj' in n:
+            custom_head_params.append(p)
+        # 3. Backbone (everything else)
+        else:
+            backbone_params.append(p)
+            
+    # Build Optimizer Groups
     optimizer_grouped_parameters = [
-        # 1. CLIP's Projection Layers (visual_projection, text_projection)
-        {
-            'params': [p for n, p in param_optimizer 
-                      if ('visual_projection' in n or 'text_projection' in n) and p.requires_grad],
-            'lr': lr_clip_proj,
-            'name': 'clip_projections'
-        },
-        # 2. Additional Projection Heads (image_proj, text_proj)
-        {
-            'params': [p for n, p in param_optimizer 
-                      if ('image_proj' in n or 'text_proj' in n) and 'clip' not in n and p.requires_grad],
-            'lr': lr_head,
-            'name': 'custom_heads'
-        }
+        {'params': clip_proj_params, 'lr': lr_clip_proj},    # Group 1: CLIP Projections
+        {'params': custom_head_params, 'lr': lr_head},       # Group 2: Custom Heads
+        {'params': backbone_params, 'lr': lr_backbone}       # Group 3: Backbone (if unfrozen)
     ]
     
-    # Filter out empty groups
-    optimizer_grouped_parameters = [g for g in optimizer_grouped_parameters if len(g['params']) > 0]
-    
-    # Log parameter counts
-    for group in optimizer_grouped_parameters:
-        total_params = sum(p.numel() for p in group['params'])
-        logging.info(f"Optimizer Group '{group.get('name', 'unnamed')}': {total_params:,} params, lr={group['lr']}")
-    
+    # Log info (useful for debugging)
+    print(f"Optimizer Groups Created:")
+    print(f"  - CLIP Projections: {len(clip_proj_params)} tensors (LR: {lr_clip_proj})")
+    print(f"  - Custom Heads:     {len(custom_head_params)} tensors (LR: {lr_head})")
+    print(f"  - Backbone/Other:   {len(backbone_params)} tensors (LR: {lr_backbone})")
+
     if opt_name == 'adamw':
         return torch.optim.AdamW(optimizer_grouped_parameters, weight_decay=wd)
     elif opt_name == 'adam':
