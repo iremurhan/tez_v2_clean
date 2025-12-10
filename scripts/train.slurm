@@ -1,8 +1,7 @@
 #!/bin/bash
 #
-# Usage: sbatch scripts/train.slurm "EXPERIMENT_NAME"
+# Usage: sbatch --job-name="EXP_NAME" scripts/train.slurm "EXP_NAME"
 #
-#SBATCH --job-name=cmr-train
 #SBATCH --output=/users/beyza.urhan/experiments/runs/%j/slurm.log
 #SBATCH --error=/users/beyza.urhan/experiments/runs/%j/err.log
 #SBATCH --time=14-00:00:00
@@ -25,20 +24,22 @@ set -euo pipefail
 # ENVIRONMENT & DIRECTORIES
 # ------------------------------------------------------------------
 EXP_NAME="${1:-}"
-JOB_DIR="/output/${SLURM_JOB_ID}${EXP_NAME:+_${EXP_NAME}}"
+
+# 1. Job Directory (ALWAYS use Job ID only - Robust & Simple)
+JOB_DIR="/output/${SLURM_JOB_ID}"
 
 # Subdirectories
 LOGS_DIR="$JOB_DIR/logs"
 META_DIR="$JOB_DIR/metadata"
 CKPT_DIR="$JOB_DIR/checkpoints"
 
+# Create directories
 mkdir -p "$JOB_DIR" "$LOGS_DIR" "$META_DIR" "$CKPT_DIR"
 
 echo "=========================================="
 echo "Job ID:        ${SLURM_JOB_ID}"
-echo "Experiment:    ${EXP_NAME:-}"
+echo "Experiment:    ${EXP_NAME:- (Unnamed)}"
 echo "Job Directory: ${JOB_DIR}"
-echo "Checkpoints:   ${CKPT_DIR}"
 echo "=========================================="
 
 # ------------------------------------------------------------------
@@ -54,23 +55,23 @@ fi
 # Configure W&B mode based on API key
 if [ -n "${WANDB_API_KEY:-}" ]; then
     export WANDB_MODE=online
-    # Match W&B run name with SLURM job
-    export WANDB_NAME="${SLURM_JOB_ID}${EXP_NAME:+_${EXP_NAME}}"
+    
+    # W&B Name Format: ID_NAME (e.g., 20362_vit_baseline)
+    if [ -n "$EXP_NAME" ]; then
+        export WANDB_NAME="${SLURM_JOB_ID}_${EXP_NAME}"
+    else
+        export WANDB_NAME="${SLURM_JOB_ID}"
+    fi
 else
     echo "W&B API Key not found. Switching to OFFLINE mode."
     export WANDB_MODE=offline
 fi
 
-# Update SLURM job name if experiment name provided
-if [ -n "$EXP_NAME" ]; then
-    scontrol update jobid=$SLURM_JOB_ID JobName=$EXP_NAME
-fi
-
 # ------------------------------------------------------------------
-# METADATA
+# METADATA SAVING
 # ------------------------------------------------------------------
 echo "Job ID: ${SLURM_JOB_ID}" > "$META_DIR/experiment_metadata.txt"
-echo "Experiment: ${EXP_NAME:-(Unnamed)}" >> "$META_DIR/experiment_metadata.txt"
+echo "Experiment: ${EXP_NAME:-}" >> "$META_DIR/experiment_metadata.txt"
 echo "Date: $(date)" >> "$META_DIR/experiment_metadata.txt"
 
 if [ -f /workspace/config.yaml ]; then
@@ -78,13 +79,14 @@ if [ -f /workspace/config.yaml ]; then
 fi
 
 # ------------------------------------------------------------------
-# START TRAINING (Direct Path Method)
+# START TRAINING
 # ------------------------------------------------------------------
 echo "Starting training..."
 
 cd /workspace
 
-# PRODUCTION RUN (Debug Mode FALSE)
+# Run training
+# Note: output.log is inside the ID folder, preventing any mix-up
 python3 -u train.py \
     --config config.yaml \
     --override \
