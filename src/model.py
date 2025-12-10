@@ -25,7 +25,8 @@ class DualEncoder(nn.Module):
         # 1. Load CLIP Model
         clip_model_name = config['model'].get('image_model_name', 'openai/clip-vit-base-patch32')
         print(f"Loading CLIP Model: {clip_model_name}...")
-        self.clip = CLIPModel.from_pretrained(clip_model_name)
+        # Use safetensors to avoid torch.load security vulnerability (CVE-2025-32434)
+        self.clip = CLIPModel.from_pretrained(clip_model_name, use_safetensors=True)
         
         # Get CLIP's projection dimension (usually 512 for base models)
         self.clip_embed_dim = self.clip.config.projection_dim
