@@ -59,33 +59,46 @@ class Trainer:
         
         num_batches = len(self.train_loader)
         
+        # Check if we should use CLIP's native loss (with learnable temperature)
+        use_clip_loss = self.config['loss'].get('use_clip_loss', False)
+        
         for step, batch in enumerate(self.train_loader):
             images = batch['image'].to(self.device)
-            images_aug = batch['image_aug'].to(self.device) # For Intra-modal Image consistency
             input_ids = batch['input_ids'].to(self.device)
             attention_mask = batch['attention_mask'].to(self.device)
             
-            # 1. Forward (Original Views)
-            img_embeds, txt_embeds = self.model(images, input_ids, attention_mask)
+            # ============================================================
+            # Option A: Use CLIP's Native Loss (Learnable Temperature)
+            # ============================================================
+            if use_clip_loss:
+                loss, _, _ = self.model.forward_with_clip_loss(images, input_ids, attention_mask)
             
-            # 2. Conditional Forward (Augmented Views for Intra-Modal Loss)
-            img_aug_embeds = None
-            txt_aug_embeds = None
+            # ============================================================
+            # Option B: Use Custom Loss (Fixed Temperature + Intra-Modal)
+            # ============================================================
+            else:
+                images_aug = batch['image_aug'].to(self.device)
+                
+                # Forward (Original Views)
+                img_embeds, txt_embeds = self.model(images, input_ids, attention_mask)
+                
+                # Conditional Forward (Augmented Views for Intra-Modal Loss)
+                img_aug_embeds = None
+                txt_aug_embeds = None
 
-            # A. Image Intra-Modal (Img <-> Img_Aug)
-            if self.config['loss'].get('intra_img_weight', 0.0) > 0:
-                # Pass augmented images through the image encoder
-                img_aug_embeds, _ = self.model(images_aug, input_ids, attention_mask)
+                # A. Image Intra-Modal (Img <-> Img_Aug)
+                if self.config['loss'].get('intra_img_weight', 0.0) > 0:
+                    img_aug_embeds, _ = self.model(images_aug, input_ids, attention_mask)
 
-            # B. Text Intra-Modal (Text <-> Text_Aug)
-            # SimCSE style: Pass same text again (dropout acts as augmentation)
-            if self.config['loss'].get('intra_txt_weight', 0.0) > 0:
-                _, txt_aug_embeds = self.model(images, input_ids, attention_mask)
+                # B. Text Intra-Modal (Text <-> Text_Aug)
+                # SimCSE style: Pass same text again (dropout acts as augmentation)
+                if self.config['loss'].get('intra_txt_weight', 0.0) > 0:
+                    _, txt_aug_embeds = self.model(images, input_ids, attention_mask)
+                
+                # Loss Calculation
+                loss = self.criterion(img_embeds, txt_embeds, img_aug_embeds, txt_aug_embeds)
             
-            # 3. Loss Calculation
-            loss = self.criterion(img_embeds, txt_embeds, img_aug_embeds, txt_aug_embeds)
-            
-            # 4. Backward
+            # Backward
             self.optimizer.zero_grad()
             loss.backward()
             self.optimizer.step()
