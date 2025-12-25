@@ -25,7 +25,7 @@ model:
   dropout: 0.1           # Dropout for additional projection heads
   
   # Unfreezing Configuration (ViT-B/32 has 12 blocks: 0-11)
-  unfreeze_vision_layers: 1   # Unfreeze last N vision transformer blocks (0 = frozen)
+  unfreeze_vision_layers: 2   # Unfreeze last N vision transformer blocks (0 = frozen)
   unfreeze_strategy: "full"   # Options: "full", "attention", "mlp", "layernorm", "bias"
 
 # ==========================================
