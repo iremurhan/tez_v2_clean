@@ -13,6 +13,7 @@ import os
 import logging
 from PIL import Image
 from torchvision import transforms
+from torchvision.transforms import InterpolationMode
 
 # Configure logger
 logger = logging.getLogger(__name__)
@@ -54,8 +55,11 @@ class CocoImageDataset(Dataset):
                     normalize,
                 ])
             else:
+                # CLIP-style preprocessing for val/test
+                # - Resize short edge to 224 with BICUBIC (CLIP's native interpolation)
+                # - CenterCrop to 224x224 (crop longer edge)
                 self.transform = transforms.Compose([
-                    transforms.Resize(256),
+                    transforms.Resize(224, interpolation=InterpolationMode.BICUBIC),
                     transforms.CenterCrop(224),
                     transforms.ToTensor(),
                     normalize,
