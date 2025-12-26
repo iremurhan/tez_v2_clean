@@ -207,7 +207,7 @@ def main():
     logger.info("Initializing Data Loaders...")
     
     # CLIP Tokenizer (different from DistilBERT!)
-    clip_model_name = config['model'].get('image_model_name', 'openai/clip-vit-base-patch32')
+    clip_model_name = config['model'].get('image_model_name', 'openai/clip-vit-large-patch14')
     logger.info(f"Loading CLIP Tokenizer from: {clip_model_name}")
     tokenizer = CLIPTokenizer.from_pretrained(clip_model_name)
     

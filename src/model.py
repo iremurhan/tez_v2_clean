@@ -6,7 +6,7 @@ from transformers import CLIPModel
 
 class DualEncoder(nn.Module):
     """
-    Dual Encoder using OpenAI CLIP (clip-vit-base-patch32).
+    Dual Encoder using OpenAI CLIP (clip-vit-large-patch14).
     
     CLIP is pre-trained on 400M image-text pairs from the internet,
     providing extremely strong visual-semantic representations.
@@ -24,12 +24,12 @@ class DualEncoder(nn.Module):
         self.dropout_p = config['model'].get('dropout', 0.1)
         
         # 1. Load CLIP Model
-        clip_model_name = config['model'].get('image_model_name', 'openai/clip-vit-base-patch32')
+        clip_model_name = config['model'].get('image_model_name', 'openai/clip-vit-large-patch14')
         print(f"Loading CLIP Model: {clip_model_name}...")
         # Use safetensors to avoid torch.load security vulnerability (CVE-2025-32434)
         self.clip = CLIPModel.from_pretrained(clip_model_name, use_safetensors=True)
         
-        # Get CLIP's projection dimension (usually 512 for base models)
+        # Get CLIP's projection dimension (typically 512 for all CLIP models)
         self.clip_embed_dim = self.clip.config.projection_dim
         print(f"CLIP Projection Dimension: {self.clip_embed_dim}")
         
@@ -61,9 +61,9 @@ class DualEncoder(nn.Module):
         """
         Freeze CLIP backbone, selectively unfreeze layers for fine-tuning.
         
-        CLIP ViT-B/32 architecture:
-        - vision_model.encoder.layers.0-11  (12 transformer blocks)
-        - text_model.encoder.layers.0-11    (12 transformer blocks)
+        CLIP ViT-L/14 architecture:
+        - vision_model.encoder.layers.0-23  (24 transformer blocks)
+        - text_model.encoder.layers.0-23    (24 transformer blocks)
         - visual_projection: Linear layer
         - text_projection: Linear layer
         
@@ -80,14 +80,15 @@ class DualEncoder(nn.Module):
             param.requires_grad = True
         
         # 2. Unfreeze last N transformer blocks of Vision Encoder
-        # ViT-B/32 has 12 blocks (0-11)
-        # Config: unfreeze_vision_layers = 2 means unfreeze blocks [10, 11]
+        # ViT-L/14 has 24 blocks (0-23)
+        # Config: unfreeze_vision_layers = 2 means unfreeze blocks [22, 23]
         num_vision_layers = self.config.get('model', {}).get('unfreeze_vision_layers', 0)
         unfreeze_strategy = self.config.get('model', {}).get('unfreeze_strategy', 'full')
         
         if num_vision_layers > 0:
             # Calculate which blocks to unfreeze (from the end)
-            total_blocks = 12  # ViT-B/32 has 12 blocks
+            # Dynamically get total blocks from the model
+            total_blocks = len(self.clip.vision_model.encoder.layers)
             unfreeze_vision_blocks = list(range(total_blocks - num_vision_layers, total_blocks))
             print(f"  Unfreezing Vision Blocks: {unfreeze_vision_blocks} (strategy: {unfreeze_strategy})")
             

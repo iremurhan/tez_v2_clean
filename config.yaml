@@ -16,16 +16,16 @@ data:
 # ==========================================
 model:
   # CLIP Model: Pre-trained on 400M image-text pairs
-  image_model_name: "openai/clip-vit-base-patch32"  # CLIP ViT-B/32
+  image_model_name: "openai/clip-vit-large-patch14"  # CLIP ViT-L/14
   # Note: text_model_name is ignored when using CLIP (CLIP has its own text encoder)
-  text_model_name: "openai/clip-vit-base-patch32"   # Kept for compatibility
+  text_model_name: "openai/clip-vit-large-patch14"   # Kept for compatibility
   image_dim: 512         # CLIP projection dimension (reference only)
   text_dim: 512          # CLIP projection dimension (reference only)
   embed_dim: 512         # Final embedding space (additional projection)
   dropout: 0.1           # Dropout for additional projection heads
   
-  # Unfreezing Configuration (ViT-B/32 has 12 blocks: 0-11)
-  unfreeze_vision_layers: 2   # Unfreeze last N vision transformer blocks (0 = frozen)
+  # Unfreezing Configuration (ViT-L/14 has 24 blocks: 0-23)
+  unfreeze_vision_layers: 1   # Unfreeze last N vision transformer blocks (0 = frozen)
   unfreeze_strategy: "full"   # Options: "full", "attention", "mlp", "layernorm", "bias"
 
 # ==========================================
@@ -47,7 +47,7 @@ training:
   # 1. CLIP's projection layers (visual_projection, text_projection)
   clip_projection_lr: 0.00005  # 5e-5 (increased from 1e-5)
   
-  # 2. Custom MLP heads (image_proj, text_proj) - if embed_dim != 512
+  # 2. Custom MLP heads (image_proj, text_proj) - if embed_dim != CLIP projection_dim
   head_lr: 0.0005              # 5e-4
   
   # 3. Backbone (Last 2 Vision Transformer Blocks) - Now trainable
