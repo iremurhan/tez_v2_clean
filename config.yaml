@@ -41,7 +41,7 @@ loss:
 # Training Configuration
 # ==========================================
 training:
-  epochs: 0  # Zero-shot test için: 0 = sadece evaluation, training yok
+  epochs: 50
   
   # --- Learning Rate Groups ---
   # 1. CLIP's projection layers (visual_projection, text_projection)
