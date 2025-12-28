@@ -25,7 +25,7 @@ import logging
 from pathlib import Path
 from collections import defaultdict
 from tqdm import tqdm
-from transformers import AutoTokenizer
+from transformers import CLIPTokenizer
 
 import sys
 sys.path.append(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
@@ -342,8 +342,11 @@ def main():
     device = torch.device("cuda" if torch.cuda.is_available() else "cpu")
     logger.info(f"Using device: {device}")
     
-    # Load tokenizer
-    tokenizer = AutoTokenizer.from_pretrained(config['model']['text_model_name'])
+    # Load CLIP tokenizer
+    clip_model_name = config['model']['image_model_name']
+    if not clip_model_name:
+        raise ValueError("config['model']['image_model_name'] must be specified in config file.")
+    tokenizer = CLIPTokenizer.from_pretrained(clip_model_name)
     
     # Load validation dataloader
     logger.info("Loading validation dataloader...")

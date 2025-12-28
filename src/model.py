@@ -106,14 +106,14 @@ class DualEncoder(nn.Module):
             unfreeze_vision_blocks = list(range(total_blocks - num_vision_layers, total_blocks))
             print(f"  Unfreezing Vision Blocks: {unfreeze_vision_blocks} (strategy: {unfreeze_strategy})")
             
-            for name, param in self.clip.vision_model.named_parameters():
-                for block_idx in unfreeze_vision_blocks:
-                    if f"encoder.layers.{block_idx}." in name:
-                        # Apply partial unfreezing strategy
-                        should_unfreeze = self._should_unfreeze_param(name, unfreeze_strategy)
-                        if should_unfreeze:
-                            param.requires_grad = True
-                        break
+            # Directly access and unfreeze the specified blocks
+            for block_idx in unfreeze_vision_blocks:
+                block = self.clip.vision_model.encoder.layers[block_idx]
+                for name, param in block.named_parameters():
+                    # Apply partial unfreezing strategy
+                    should_unfreeze = self._should_unfreeze_param(name, unfreeze_strategy)
+                    if should_unfreeze:
+                        param.requires_grad = True
         
         # 3. Unfreeze vision model's post_layernorm (only if vision blocks are unfrozen)
         if num_vision_layers > 0 and unfreeze_strategy in ['full', 'layernorm']:
