@@ -48,19 +48,19 @@ class CocoImageDataset(Dataset):
             if split == 'train':
                 self.transform = transforms.Compose([
                     # The goal is to obtain scale invariance
-                    transforms.RandomResizedCrop(224),
+                    transforms.RandomResizedCrop(336),
                     transforms.RandomHorizontalFlip(),
                     transforms.ColorJitter(brightness=0.1, contrast=0.1, saturation=0.1, hue=0.1),
                     transforms.ToTensor(),
                     normalize,
                 ])
             else:
-                # CLIP-style preprocessing for val/test
-                # - Resize short edge to 224 with BICUBIC (CLIP's native interpolation)
-                # - CenterCrop to 224x224 (crop longer edge)
+                # CLIP-style preprocessing for val/test @ 336px
+                # - Resize short edge to 336 with BICUBIC (CLIP's native interpolation)
+                # - CenterCrop to 336x336 (crop longer edge)
                 self.transform = transforms.Compose([
-                    transforms.Resize(224, interpolation=InterpolationMode.BICUBIC),
-                    transforms.CenterCrop(224),
+                    transforms.Resize(336, interpolation=InterpolationMode.BICUBIC),
+                    transforms.CenterCrop(336),
                     transforms.ToTensor(),
                     normalize,
                 ])

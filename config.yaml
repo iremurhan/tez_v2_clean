@@ -16,15 +16,15 @@ data:
 # ==========================================
 model:
   # CLIP Model: Pre-trained on 400M image-text pairs
-  image_model_name: "openai/clip-vit-large-patch14"  # CLIP ViT-L/14
+  image_model_name: "openai/clip-vit-large-patch14-336"  # CLIP ViT-L/14 @ 336px
   # Note: text_model_name is ignored when using CLIP (CLIP has its own text encoder)
-  text_model_name: "openai/clip-vit-large-patch14"   # Kept for compatibility
+  text_model_name: "openai/clip-vit-large-patch14-336"   # Kept for compatibility
   image_dim: 768         # CLIP projection dimension (reference only)
   text_dim: 768          # CLIP projection dimension (reference only)
   embed_dim: 768         # Final embedding space (additional projection)
   dropout: 0.1           # Dropout for additional projection heads
   
-  # Unfreezing Configuration (ViT-L/14 has 24 blocks: 0-23)
+  # Unfreezing Configuration (ViT-L/14-336 has 24 blocks: 0-23)
   unfreeze_vision_layers: 0   # Unfreeze last N vision transformer blocks (0 = frozen)
   unfreeze_strategy: "full"   # Options: "full", "attention", "mlp", "layernorm", "bias"
 

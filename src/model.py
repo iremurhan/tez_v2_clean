@@ -9,10 +9,11 @@ logger = logging.getLogger(__name__)
 
 class DualEncoder(nn.Module):
     """
-    Dual Encoder using OpenAI CLIP (clip-vit-large-patch14).
+    Dual Encoder using OpenAI CLIP (clip-vit-large-patch14-336).
     
     CLIP is pre-trained on 400M image-text pairs from the internet,
     providing extremely strong visual-semantic representations.
+    Uses 336x336 input resolution for higher quality features.
     
     Strategy:
     - Freeze CLIP backbone (vision + text encoders)
@@ -191,7 +192,7 @@ class DualEncoder(nn.Module):
         Forward pass returning L2-normalized embeddings.
         
         Args:
-            images: [Batch, 3, 224, 224] - Pixel values
+            images: [Batch, 3, 336, 336] - Pixel values (336px for CLIP ViT-L/14-336)
             input_ids: [Batch, SeqLen] - Tokenized text
             attention_mask: [Batch, SeqLen] - Attention mask
             
