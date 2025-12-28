@@ -201,21 +201,21 @@ class Trainer:
         txt_embeds = torch.cat(txt_embeds_list, dim=0)
         image_ids = torch.cat(image_ids_list, dim=0)
         
-        # Get unique images and their indices
-        # COCO structure: 5 captions per image, but image_ids tell us the real mapping
-        unique_image_ids, unique_indices = torch.unique(image_ids, return_inverse=True, sorted=False)
-        # unique_indices maps each sample to its unique image index
-        
-        # Get unique image embeddings (one per unique image_id)
-        # Find the first occurrence of each unique image_id
+        # Get unique images in insertion order (preserving order of first occurrence)
+        # This ensures alignment between unique_image_ids and img_embeds_unique
         seen_image_ids = set()
         first_occurrence_indices = []
+        unique_image_ids_list = []
+        
         for idx in range(len(image_ids)):
             img_id = image_ids[idx].item()
             if img_id not in seen_image_ids:
                 seen_image_ids.add(img_id)
                 first_occurrence_indices.append(idx)
+                unique_image_ids_list.append(img_id)
         
+        # Convert to tensors - order matches first_occurrence_indices (insertion order)
+        unique_image_ids = torch.tensor(unique_image_ids_list, dtype=image_ids.dtype)
         img_embeds_unique = img_embeds[first_occurrence_indices]
         
         r_t2i, r_i2t = compute_recall_at_k(img_embeds_unique, txt_embeds, image_ids, unique_image_ids)
