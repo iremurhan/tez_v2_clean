@@ -19,9 +19,9 @@ model:
   image_model_name: "openai/clip-vit-large-patch14"  # CLIP ViT-L/14
   # Note: text_model_name is ignored when using CLIP (CLIP has its own text encoder)
   text_model_name: "openai/clip-vit-large-patch14"   # Kept for compatibility
-  image_dim: 512         # CLIP projection dimension (reference only)
-  text_dim: 512          # CLIP projection dimension (reference only)
-  embed_dim: 512         # Final embedding space (additional projection)
+  image_dim: 768         # CLIP projection dimension (reference only)
+  text_dim: 768          # CLIP projection dimension (reference only)
+  embed_dim: 768         # Final embedding space (additional projection)
   dropout: 0.1           # Dropout for additional projection heads
   
   # Unfreezing Configuration (ViT-L/14 has 24 blocks: 0-23)
