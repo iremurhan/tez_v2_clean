@@ -32,25 +32,30 @@ def setup_seed(seed=42):
     torch.backends.cudnn.deterministic = True
 
 @torch.no_grad()
-def compute_recall_at_k(img_embeds, txt_embeds, k_values=[1, 5, 10]):
+def compute_recall_at_k(img_embeds, txt_embeds, image_ids, unique_image_ids, k_values=[1, 5, 10]):
     """
     Compute Recall@K for Image-Text Retrieval metrics.
     
-    Logic for MS-COCO:
-    - There are N unique images.
-    - There are 5*N captions.
-    - Captions are ordered sequentially: [Img1_C1, Img1_C2 ... Img1_C5, Img2_C1 ...]
+    Uses image_id matching from JSON data for accurate ground truth.
     
     Args:
-        img_embeds (Tensor): Shape [N_images, Dim] -> Normalized image features
+        img_embeds (Tensor): Shape [N_images, Dim] -> Normalized image features (unique images)
         txt_embeds (Tensor): Shape [N_captions, Dim] -> Normalized text features
-                             (Where N_captions should be 5 * N_images)
+        image_ids (Tensor): Shape [N_captions] -> Image ID for each caption (from dataset) - REQUIRED
+        unique_image_ids (Tensor): Shape [N_images] -> Unique image IDs corresponding to img_embeds - REQUIRED
         k_values (list): Recall thresholds (e.g., R@1, R@5, R@10)
         
     Returns:
         r_t2i (dict): Text-to-Image Recall scores
         r_i2t (dict): Image-to-Text Recall scores
     """
+    # Validate required parameters
+    if image_ids is None or unique_image_ids is None:
+        raise ValueError(
+            "image_ids and unique_image_ids are required for accurate ground truth matching. "
+            "These should be extracted from the dataset JSON file."
+        )
+    
     # 1. Similarity Matrix Computation
     # [N, D] x [M, D]^T -> [N, M]
     # Rows: Images, Columns: Captions
@@ -59,13 +64,30 @@ def compute_recall_at_k(img_embeds, txt_embeds, k_values=[1, 5, 10]):
     n_imgs = img_embeds.shape[0]
     n_txts = txt_embeds.shape[0]
     
-    # 2. Safety Check
-    if n_txts != 5 * n_imgs:
-        logger.warning(
-            f"Metric Warning: Num captions ({n_txts}) is not 5x Num images ({n_imgs}). "
-            "Recall calculation assumes standard COCO 1-to-5 mapping. "
-            "If using a custom subset, ignore this."
-        )
+    # 2. Build mapping from image_id to unique image index
+    # Create mapping: image_id -> index in unique_image_ids
+    image_id_to_idx = {img_id.item(): idx for idx, img_id in enumerate(unique_image_ids)}
+    
+    # Build ground truth: for each caption, which unique image index does it belong to?
+    caption_to_image_idx = []
+    for caption_idx in range(n_txts):
+        caption_image_id = image_ids[caption_idx].item()
+        if caption_image_id not in image_id_to_idx:
+            raise ValueError(
+                f"Caption {caption_idx} has image_id {caption_image_id} which is not found in unique_image_ids. "
+                "This indicates a mismatch between caption and image data."
+            )
+        unique_img_idx = image_id_to_idx[caption_image_id]
+        caption_to_image_idx.append(unique_img_idx)
+    caption_to_image_idx = torch.tensor(caption_to_image_idx, dtype=torch.long)
+    
+    # Build reverse mapping: for each unique image, which caption indices belong to it?
+    image_to_caption_indices = {}
+    for img_idx in range(n_imgs):
+        img_id = unique_image_ids[img_idx].item()
+        # Find all caption indices that have this image_id
+        matching_captions = (image_ids == img_id).nonzero(as_tuple=True)[0]
+        image_to_caption_indices[img_idx] = set(matching_captions.tolist())
 
     # ----------------------------------------------------------------------
     # A. Text-to-Image Retrieval (T2I)
@@ -78,9 +100,8 @@ def compute_recall_at_k(img_embeds, txt_embeds, k_values=[1, 5, 10]):
     scores_t2i = {k: 0.0 for k in k_values}
     
     for i in range(n_txts):
-        # Ground Truth: For caption index 'i', the correct image index is 'i // 5'
-        # Example: Caption 0,1,2,3,4 -> Image 0
-        gt_img_idx = i // 5 
+        # Ground Truth: Get the correct unique image index for this caption
+        gt_img_idx = caption_to_image_idx[i].item()
         
         # Sort scores for this query (descending)
         # We only care about the rank of the correct image
@@ -102,13 +123,13 @@ def compute_recall_at_k(img_embeds, txt_embeds, k_values=[1, 5, 10]):
     # ----------------------------------------------------------------------
     # B. Image-to-Text Retrieval (I2T)
     # Query: Image (Size N), Database: Captions (Size M)
-    # Goal: For a given image, find ANY of its 5 correct captions.
+    # Goal: For a given image, find ANY of its correct captions.
     # ----------------------------------------------------------------------
     scores_i2t = {k: 0.0 for k in k_values}
     
     for i in range(n_imgs):
-        # Ground Truth: Image 'i' corresponds to caption indices [5*i ... 5*i+4]
-        gt_cap_indices = set(range(i * 5, (i + 1) * 5))
+        # Ground Truth: Get all caption indices that belong to this image
+        gt_cap_indices = image_to_caption_indices[i]
         
         # Sort captions for this image
         sorted_indices = sims[i].argsort(descending=True)

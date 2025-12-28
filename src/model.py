@@ -1,7 +1,10 @@
 import torch
 import torch.nn as nn
 import torch.nn.functional as F
+import logging
 from transformers import CLIPModel
+
+logger = logging.getLogger(__name__)
 
 
 class DualEncoder(nn.Module):
@@ -20,26 +23,36 @@ class DualEncoder(nn.Module):
         super().__init__()
         
         self.config = config  # Store for use in freezing strategy
-        self.embed_dim = config['model']['embed_dim']
         self.dropout_p = config['model'].get('dropout', 0.1)
         
-        # 1. Load CLIP Model
-        clip_model_name = config['model'].get('image_model_name', 'openai/clip-vit-large-patch14')
-        print(f"Loading CLIP Model: {clip_model_name}...")
+        # 1. Load CLIP Model FIRST to get native dimension
+        clip_model_name = config['model']['image_model_name']
+        if not clip_model_name:
+            raise ValueError("config['model']['image_model_name'] must be specified in config file.")
+        logger.info(f"Loading CLIP Model: {clip_model_name}...")
         # Use safetensors to avoid torch.load security vulnerability (CVE-2025-32434)
         self.clip = CLIPModel.from_pretrained(clip_model_name, use_safetensors=True)
         
-        # Get CLIP's projection dimension (typically 512 for all CLIP models)
+        # Get CLIP's native projection dimension
         self.clip_embed_dim = self.clip.config.projection_dim
-        print(f"CLIP Projection Dimension: {self.clip_embed_dim}")
+        logger.info(f"CLIP Projection Dimension: {self.clip_embed_dim}")
         
-        # 2. Freezing Strategy - Freeze backbone, train projections
-        self._apply_freezing_strategy()
+        # 2. Determine target embedding dimension
+        config_embed_dim = config['model'].get('embed_dim')
         
-        # 3. Optional: Additional projection head to match our embed_dim
-        # If CLIP's output (512) != our target embed_dim (256), add a small MLP
-        if self.clip_embed_dim != self.embed_dim:
-            print(f"Adding projection: {self.clip_embed_dim} -> {self.embed_dim}")
+        # Auto-dimension logic: Use CLIP's native dimension if config is None or matches
+        if config_embed_dim is None or config_embed_dim == self.clip_embed_dim:
+            self.embed_dim = self.clip_embed_dim
+            logger.info(f"Using raw CLIP features (Dim: {self.embed_dim}). No extra projection.")
+            self.image_proj = None
+            self.text_proj = None
+        else:
+            # Config explicitly requires a different dimension - create projection layers
+            self.embed_dim = config_embed_dim
+            logger.warning(
+                f"WARNING: Projecting CLIP features from {self.clip_embed_dim} to {self.embed_dim}. "
+                "These layers are randomly initialized!"
+            )
             self.image_proj = nn.Sequential(
                 nn.Linear(self.clip_embed_dim, self.embed_dim),
                 nn.BatchNorm1d(self.embed_dim),
@@ -53,9 +66,9 @@ class DualEncoder(nn.Module):
                 nn.Dropout(self.dropout_p),
             )
             self._init_head_weights()
-        else:
-            self.image_proj = None
-            self.text_proj = None
+        
+        # 3. Freezing Strategy - Freeze backbone, train projections
+        self._apply_freezing_strategy()
     
     def _apply_freezing_strategy(self):
         """

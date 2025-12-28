@@ -7,7 +7,7 @@ data:
   images_path: "datasets/coco"
   # Caption path: Using Karpathy JSON structure usually
   captions_path: "datasets/coco/caption_datasets/dataset_coco.json"
-  batch_size: 64
+  batch_size: 128
   num_workers: 8
   max_length: 77  # Max token length for CLIP (CLIP's default context length)
 
@@ -42,7 +42,7 @@ loss:
 # ==========================================
 training:
   epochs: 50
-  
+
   # --- Learning Rate Groups ---
   # 1. CLIP's projection layers (visual_projection, text_projection)
   clip_projection_lr: 0.00005  # 5e-5 (increased from 1e-5)

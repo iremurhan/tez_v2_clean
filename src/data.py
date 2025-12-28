@@ -91,8 +91,18 @@ class CocoImageDataset(Dataset):
                 else:
                     img_id = int(img['cocoid'])
                 
-                # Add all 5 captions for this image
-                for sent in img['sentences']:
+                # Limit to exactly 5 captions per image to match evaluation assumptions
+                # MS-COCO can have 6-7 captions, but we need exactly 5 for consistent evaluation
+                sentences = img['sentences'][:5]
+                
+                if len(sentences) < 5:
+                    logger.warning(
+                        f"Image {img_id} has only {len(sentences)} captions (expected 5). "
+                        "This image will have fewer samples than expected."
+                    )
+                
+                # Add exactly 5 captions (or fewer if image has < 5 captions)
+                for sent in sentences:
                     self.samples.append({
                         'image_id': img_id,
                         'caption': sent['raw'],

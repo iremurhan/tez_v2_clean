@@ -22,6 +22,15 @@ class Trainer:
         self.checkpoint_dir = config['logging']['checkpoint_dir']
         self.best_r1 = 0.0
         
+        # Initialize Mixed Precision Training (AMP)
+        self.use_amp = torch.cuda.is_available()  # Only use AMP on CUDA devices
+        if self.use_amp:
+            self.scaler = torch.cuda.amp.GradScaler()
+            logger.info("Mixed Precision Training (AMP) enabled.")
+        else:
+            self.scaler = None
+            logger.info("Mixed Precision Training (AMP) disabled (CPU mode).")
+        
         # Create checkpoint directory
         os.makedirs(self.checkpoint_dir, exist_ok=True)
 
@@ -37,6 +46,11 @@ class Trainer:
         self.model.load_state_dict(checkpoint['model_state_dict'])
         self.optimizer.load_state_dict(checkpoint['optimizer_state_dict'])
         self.scheduler.load_state_dict(checkpoint['scheduler_state_dict'])
+        
+        # Load scaler state if available (for AMP)
+        if self.use_amp and 'scaler_state_dict' in checkpoint:
+            self.scaler.load_state_dict(checkpoint['scaler_state_dict'])
+            logger.info("GradScaler state loaded from checkpoint.")
         
         # 2. Load State Info (STRICT)
         # Eğer bu anahtarlar yoksa kod burada KeyError verip duracak.
@@ -68,40 +82,77 @@ class Trainer:
             attention_mask = batch['attention_mask'].to(self.device)
             
             # ============================================================
-            # Option A: Use CLIP's Native Loss (Learnable Temperature)
+            # Forward Pass with Mixed Precision (AMP)
             # ============================================================
-            if use_clip_loss:
-                loss, _, _ = self.model.forward_with_clip_loss(images, input_ids, attention_mask)
-            
-            # ============================================================
-            # Option B: Use Custom Loss (Fixed Temperature + Intra-Modal)
-            # ============================================================
+            if self.use_amp:
+                # Use autocast for forward pass
+                with torch.cuda.amp.autocast():
+                    # Option A: Use CLIP's Native Loss (Learnable Temperature)
+                    if use_clip_loss:
+                        loss, _, _ = self.model.forward_with_clip_loss(images, input_ids, attention_mask)
+                    
+                    # Option B: Use Custom Loss (Fixed Temperature + Intra-Modal)
+                    else:
+                        images_aug = batch['image_aug'].to(self.device)
+                        
+                        # Forward (Original Views)
+                        img_embeds, txt_embeds = self.model(images, input_ids, attention_mask)
+                        
+                        # Conditional Forward (Augmented Views for Intra-Modal Loss)
+                        img_aug_embeds = None
+                        txt_aug_embeds = None
+
+                        # A. Image Intra-Modal (Img <-> Img_Aug)
+                        if self.config['loss'].get('intra_img_weight', 0.0) > 0:
+                            img_aug_embeds, _ = self.model(images_aug, input_ids, attention_mask)
+
+                        # B. Text Intra-Modal (Text <-> Text_Aug)
+                        # SimCSE style: Pass same text again (dropout acts as augmentation)
+                        if self.config['loss'].get('intra_txt_weight', 0.0) > 0:
+                            _, txt_aug_embeds = self.model(images, input_ids, attention_mask)
+                        
+                        # Loss Calculation
+                        loss = self.criterion(img_embeds, txt_embeds, img_aug_embeds, txt_aug_embeds)
+                
+                # Backward with gradient scaling
+                self.optimizer.zero_grad()
+                self.scaler.scale(loss).backward()
+                self.scaler.step(self.optimizer)
+                self.scaler.update()
             else:
-                images_aug = batch['image_aug'].to(self.device)
+                # Standard precision training (CPU or AMP disabled)
+                # Option A: Use CLIP's Native Loss (Learnable Temperature)
+                if use_clip_loss:
+                    loss, _, _ = self.model.forward_with_clip_loss(images, input_ids, attention_mask)
                 
-                # Forward (Original Views)
-                img_embeds, txt_embeds = self.model(images, input_ids, attention_mask)
-                
-                # Conditional Forward (Augmented Views for Intra-Modal Loss)
-                img_aug_embeds = None
-                txt_aug_embeds = None
+                # Option B: Use Custom Loss (Fixed Temperature + Intra-Modal)
+                else:
+                    images_aug = batch['image_aug'].to(self.device)
+                    
+                    # Forward (Original Views)
+                    img_embeds, txt_embeds = self.model(images, input_ids, attention_mask)
+                    
+                    # Conditional Forward (Augmented Views for Intra-Modal Loss)
+                    img_aug_embeds = None
+                    txt_aug_embeds = None
 
-                # A. Image Intra-Modal (Img <-> Img_Aug)
-                if self.config['loss'].get('intra_img_weight', 0.0) > 0:
-                    img_aug_embeds, _ = self.model(images_aug, input_ids, attention_mask)
+                    # A. Image Intra-Modal (Img <-> Img_Aug)
+                    if self.config['loss'].get('intra_img_weight', 0.0) > 0:
+                        img_aug_embeds, _ = self.model(images_aug, input_ids, attention_mask)
 
-                # B. Text Intra-Modal (Text <-> Text_Aug)
-                # SimCSE style: Pass same text again (dropout acts as augmentation)
-                if self.config['loss'].get('intra_txt_weight', 0.0) > 0:
-                    _, txt_aug_embeds = self.model(images, input_ids, attention_mask)
+                    # B. Text Intra-Modal (Text <-> Text_Aug)
+                    # SimCSE style: Pass same text again (dropout acts as augmentation)
+                    if self.config['loss'].get('intra_txt_weight', 0.0) > 0:
+                        _, txt_aug_embeds = self.model(images, input_ids, attention_mask)
+                    
+                    # Loss Calculation
+                    loss = self.criterion(img_embeds, txt_embeds, img_aug_embeds, txt_aug_embeds)
                 
-                # Loss Calculation
-                loss = self.criterion(img_embeds, txt_embeds, img_aug_embeds, txt_aug_embeds)
+                # Backward
+                self.optimizer.zero_grad()
+                loss.backward()
+                self.optimizer.step()
             
-            # Backward
-            self.optimizer.zero_grad()
-            loss.backward()
-            self.optimizer.step()
             self.scheduler.step()
             
             losses.update(loss.item(), images.size(0))
@@ -128,6 +179,7 @@ class Trainer:
         self.model.eval()
         img_embeds_list = []
         txt_embeds_list = []
+        image_ids_list = []
         
         # Handle "TEST" epoch logging string
         epoch_log = epoch if isinstance(epoch, str) else epoch
@@ -142,14 +194,31 @@ class Trainer:
             img_embeds_list.append(img_emb.cpu())
             txt_embeds_list.append(txt_emb.cpu())
             
+            # Collect image_ids for ground truth matching
+            image_ids_list.append(batch['image_id'].cpu())
+            
         img_embeds = torch.cat(img_embeds_list, dim=0)
         txt_embeds = torch.cat(txt_embeds_list, dim=0)
+        image_ids = torch.cat(image_ids_list, dim=0)
         
-        # COCO structure: 5 captions per image
-        # Unique images are at indices 0, 5, 10...
-        img_embeds_unique = img_embeds[::5]
+        # Get unique images and their indices
+        # COCO structure: 5 captions per image, but image_ids tell us the real mapping
+        unique_image_ids, unique_indices = torch.unique(image_ids, return_inverse=True, sorted=False)
+        # unique_indices maps each sample to its unique image index
         
-        r_t2i, r_i2t = compute_recall_at_k(img_embeds_unique, txt_embeds)
+        # Get unique image embeddings (one per unique image_id)
+        # Find the first occurrence of each unique image_id
+        seen_image_ids = set()
+        first_occurrence_indices = []
+        for idx in range(len(image_ids)):
+            img_id = image_ids[idx].item()
+            if img_id not in seen_image_ids:
+                seen_image_ids.add(img_id)
+                first_occurrence_indices.append(idx)
+        
+        img_embeds_unique = img_embeds[first_occurrence_indices]
+        
+        r_t2i, r_i2t = compute_recall_at_k(img_embeds_unique, txt_embeds, image_ids, unique_image_ids)
         
         # Log
         logger.info(
@@ -218,6 +287,9 @@ class Trainer:
                         'best_r1': self.best_r1,
                         'config': self.config
                     }
+                    # Save scaler state if using AMP
+                    if self.use_amp:
+                        checkpoint['scaler_state_dict'] = self.scaler.state_dict()
                     
                     # Overwrite best_model.pth (no epoch/score in filename to save disk)
                     best_path = os.path.join(self.checkpoint_dir, "best_model.pth")
@@ -234,6 +306,9 @@ class Trainer:
                     'best_r1': self.best_r1,
                     'config': self.config
                 }
+                # Save scaler state if using AMP
+                if self.use_amp:
+                    checkpoint['scaler_state_dict'] = self.scaler.state_dict()
                 
                 last_path = os.path.join(self.checkpoint_dir, "last_model.pth")
                 torch.save(checkpoint, last_path)
