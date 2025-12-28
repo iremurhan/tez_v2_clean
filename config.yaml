@@ -25,7 +25,7 @@ model:
   dropout: 0.1           # Dropout for additional projection heads
   
   # Unfreezing Configuration (ViT-L/14 has 24 blocks: 0-23)
-  unfreeze_vision_layers: 1   # Unfreeze last N vision transformer blocks (0 = frozen)
+  unfreeze_vision_layers: 0   # Unfreeze last N vision transformer blocks (0 = frozen)
   unfreeze_strategy: "full"   # Options: "full", "attention", "mlp", "layernorm", "bias"
 
 # ==========================================
@@ -41,7 +41,7 @@ loss:
 # Training Configuration
 # ==========================================
 training:
-  epochs: 50
+  epochs: 0  # Zero-shot test için: 0 = sadece evaluation, training yok
   
   # --- Learning Rate Groups ---
   # 1. CLIP's projection layers (visual_projection, text_projection)
