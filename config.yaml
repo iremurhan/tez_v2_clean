@@ -86,7 +86,7 @@ debug:
 # ==========================================
 distillation:
   enabled: true
-  top_k: 100                # Number of nearest neighbors for soft distribution (increased from 20)
+  top_k: 50                # Number of nearest neighbors for soft distribution (increased from 20)
   alpha: 0.4               # Distillation loss weight (to be used in loss later)
   temperature: 1.0         # Softmax temperature for soft labels (to be used in loss later)
   mining_targets_path: "datasets/coco/mining_targets.pt"

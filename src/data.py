@@ -4,6 +4,7 @@ data.py
 -------
 
 Data loading and preprocessing for cross-modal retrieval.
+Supports optional Knowledge Distillation with pre-mined soft targets.
 """
 
 import torch
@@ -19,7 +20,18 @@ from torchvision.transforms import InterpolationMode
 logger = logging.getLogger(__name__)
 
 class CocoImageDataset(Dataset):
-    def __init__(self, images_root_path, captions_path, tokenizer, max_length=50, split='train', transform=None, intra_modal_aug=False):
+    def __init__(
+        self, 
+        images_root_path, 
+        captions_path, 
+        tokenizer, 
+        max_length=77, 
+        split='train', 
+        transform=None, 
+        intra_modal_aug=False,
+        mining_targets_path=None,
+        distill_top_k=None
+    ):
         """
         Args:
             images_root_path (str): Root directory containing image folders (train2014/val2014).
@@ -29,12 +41,40 @@ class CocoImageDataset(Dataset):
             split (str): 'train', 'val', or 'test'.
             transform (callable, optional): Base transform to be applied to the image.
             intra_modal_aug (bool): If True, generates a second augmented view of the image for intra-modal loss.
+            mining_targets_path (str, optional): Path to pre-mined soft targets (.pt file).
+            distill_top_k (int, optional): Number of neighbors to use (slice from mined targets).
         """
         self.images_root_path = images_root_path
         self.tokenizer = tokenizer
         self.max_length = max_length
         self.split = split
         self.intra_modal_aug = intra_modal_aug
+        self.distill_top_k = distill_top_k
+        
+        # ---------------------------------------------------------
+        # Knowledge Distillation: Load Mining Targets
+        # ---------------------------------------------------------
+        self.mining_targets = None
+        if mining_targets_path and os.path.exists(mining_targets_path):
+            logger.info(f"Loading mining targets from {mining_targets_path}")
+            self.mining_targets = torch.load(mining_targets_path, map_location='cpu')
+            
+            # Validate structure
+            if 'indices' not in self.mining_targets or 'scores' not in self.mining_targets:
+                logger.error("Mining targets file missing 'indices' or 'scores' keys!")
+                self.mining_targets = None
+            else:
+                n_samples = self.mining_targets['indices'].shape[0]
+                mined_k = self.mining_targets['indices'].shape[1]
+                logger.info(f"Loaded mining targets: {n_samples:,} samples, {mined_k} neighbors each")
+                
+                # Slice to distill_top_k if specified
+                if self.distill_top_k and self.distill_top_k < mined_k:
+                    self.mining_targets['indices'] = self.mining_targets['indices'][:, :self.distill_top_k]
+                    self.mining_targets['scores'] = self.mining_targets['scores'][:, :self.distill_top_k]
+                    logger.info(f"Sliced to top_k={self.distill_top_k} neighbors")
+        elif mining_targets_path:
+            logger.warning(f"Mining targets path specified but file not found: {mining_targets_path}")
         
         # Define Transforms
         if transform is None:
@@ -144,7 +184,8 @@ class CocoImageDataset(Dataset):
             return_tensors='pt'
         )
         
-        return {
+        # 5. Build output dict
+        output = {
             'image': img_tensor,       
             'image_aug': img_aug_tensor,
             'input_ids': tokenized['input_ids'].squeeze(0),
@@ -152,11 +193,26 @@ class CocoImageDataset(Dataset):
             'index': idx,
             'image_id': image_id
         }
+        
+        # 6. Add Knowledge Distillation targets (if available)
+        if self.mining_targets is not None:
+            # Check bounds (in case dataset was truncated in debug mode)
+            if idx < self.mining_targets['indices'].shape[0]:
+                output['soft_target_indices'] = self.mining_targets['indices'][idx]
+                output['soft_target_scores'] = self.mining_targets['scores'][idx]
+            else:
+                # Fallback: return zeros if index out of bounds (shouldn't happen normally)
+                k = self.mining_targets['indices'].shape[1]
+                output['soft_target_indices'] = torch.zeros(k, dtype=torch.long)
+                output['soft_target_scores'] = torch.zeros(k, dtype=torch.float32)
+        
+        return output
+
 
 def get_dataloader(config, tokenizer, split='train'):
     """
     Factory function to create dataloaders.
-    Strict Mode: All configurations must be present in the YAML file.
+    Supports Knowledge Distillation with pre-mined targets.
     """
     shuffle = (split == 'train')
     
@@ -167,14 +223,29 @@ def get_dataloader(config, tokenizer, split='train'):
     
     images_root = config['data']['images_path']
     
+    # ---------------------------------------------------------
+    # Knowledge Distillation config (only for training)
+    # ---------------------------------------------------------
+    mining_targets_path = None
+    distill_top_k = None
+    
+    if split == 'train':
+        distillation_config = config.get('distillation', {})
+        if distillation_config.get('enabled', False):
+            mining_targets_path = distillation_config.get('mining_targets_path')
+            distill_top_k = distillation_config.get('top_k')
+            logger.info(f"Distillation enabled: top_k={distill_top_k}, path={mining_targets_path}")
+    
     dataset = CocoImageDataset(
         images_root_path=images_root,
         captions_path=config['data']['captions_path'],
         tokenizer=tokenizer,
         max_length=config['data'].get('max_length', 50),
         split=split,
-        transform=None, # Sınıf içinde default transformları kullanacak (Train/Val ayrımı orada var)
-        intra_modal_aug=intra_modal_aug
+        transform=None,  # Sınıf içinde default transformları kullanacak (Train/Val ayrımı orada var)
+        intra_modal_aug=intra_modal_aug,
+        mining_targets_path=mining_targets_path,
+        distill_top_k=distill_top_k
     )
 
     # Debug Truncation

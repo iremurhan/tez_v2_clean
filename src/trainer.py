@@ -1,8 +1,10 @@
 import torch
+import torch.nn.functional as F
 import logging
 import wandb
 import os
 from .utils import AverageMeter, compute_recall_at_k
+from .loss import DistillationLoss
 
 logger = logging.getLogger(__name__)
 
@@ -30,6 +32,26 @@ class Trainer:
         else:
             self.scaler = None
             logger.info("Mixed Precision Training (AMP) disabled (CPU mode).")
+        
+        # ---------------------------------------------------------
+        # Knowledge Distillation Setup
+        # ---------------------------------------------------------
+        self.use_distillation = False
+        self.distill_loss_fn = None
+        self.distill_alpha = 0.0
+        
+        distillation_config = config.get('distillation', {})
+        if distillation_config.get('enabled', False):
+            self.use_distillation = True
+            self.distill_alpha = distillation_config.get('alpha', 0.5)
+            distill_temp = distillation_config.get('temperature', 1.0)
+            
+            self.distill_loss_fn = DistillationLoss(
+                alpha=self.distill_alpha,
+                temperature=distill_temp
+            )
+            
+            logger.info(f"Knowledge Distillation enabled: alpha={self.distill_alpha}, temperature={distill_temp}")
         
         # Create checkpoint directory
         os.makedirs(self.checkpoint_dir, exist_ok=True)
@@ -70,6 +92,8 @@ class Trainer:
     def train_epoch(self, epoch):
         self.model.train()
         losses = AverageMeter()
+        losses_clip = AverageMeter()
+        losses_distill = AverageMeter()
         
         num_batches = len(self.train_loader)
         
@@ -81,6 +105,16 @@ class Trainer:
             input_ids = batch['input_ids'].to(self.device)
             attention_mask = batch['attention_mask'].to(self.device)
             
+            # For distillation: get batch indices and teacher targets
+            batch_indices = batch['index'].to(self.device) if self.use_distillation else None
+            soft_target_indices = batch.get('soft_target_indices')
+            soft_target_scores = batch.get('soft_target_scores')
+            
+            if soft_target_indices is not None:
+                soft_target_indices = soft_target_indices.to(self.device)
+            if soft_target_scores is not None:
+                soft_target_scores = soft_target_scores.to(self.device)
+            
             # ============================================================
             # Forward Pass with Mixed Precision (AMP)
             # ============================================================
@@ -89,7 +123,9 @@ class Trainer:
                 with torch.cuda.amp.autocast():
                     # Option A: Use CLIP's Native Loss (Learnable Temperature)
                     if use_clip_loss:
-                        loss, _, _ = self.model.forward_with_clip_loss(images, input_ids, attention_mask)
+                        loss_clip, logits_per_image, logits_per_text = self.model.forward_with_clip_loss(
+                            images, input_ids, attention_mask
+                        )
                     
                     # Option B: Use Custom Loss (Fixed Temperature + Intra-Modal)
                     else:
@@ -112,7 +148,44 @@ class Trainer:
                             _, txt_aug_embeds = self.model(images, input_ids, attention_mask)
                         
                         # Loss Calculation
-                        loss = self.criterion(img_embeds, txt_embeds, img_aug_embeds, txt_aug_embeds)
+                        loss_clip = self.criterion(img_embeds, txt_embeds, img_aug_embeds, txt_aug_embeds)
+                        
+                        # For distillation, compute text-to-text logits
+                        if use_clip_loss:
+                            logits_per_text = logits_per_text  # Already computed
+                        else:
+                            logits_per_text = txt_embeds @ txt_embeds.t()
+                    
+                    # ---------------------------------------------------------
+                    # Knowledge Distillation Loss
+                    # ---------------------------------------------------------
+                    loss_distill = torch.tensor(0.0, device=self.device)
+                    
+                    if self.use_distillation and soft_target_indices is not None:
+                        # Compute text-to-text similarity logits for distillation
+                        if use_clip_loss:
+                            # For CLIP loss mode, we need text embeddings for distillation
+                            # Get them separately
+                            txt_embeds = self.model.clip.get_text_features(
+                                input_ids=input_ids,
+                                attention_mask=attention_mask
+                            )
+                            txt_embeds = F.normalize(txt_embeds, p=2, dim=1)
+                        
+                        # Text-to-text similarity matrix
+                        student_text_logits = txt_embeds @ txt_embeds.t()
+                        
+                        loss_distill = self.distill_loss_fn(
+                            student_logits=student_text_logits,
+                            batch_indices=batch_indices,
+                            teacher_indices=soft_target_indices,
+                            teacher_scores=soft_target_scores
+                        )
+                        
+                        # Combine losses: (1 - alpha) * clip + alpha * distill
+                        loss = (1 - self.distill_alpha) * loss_clip + self.distill_alpha * loss_distill
+                    else:
+                        loss = loss_clip
                 
                 # Backward with gradient scaling
                 self.optimizer.zero_grad()
@@ -123,7 +196,9 @@ class Trainer:
                 # Standard precision training (CPU or AMP disabled)
                 # Option A: Use CLIP's Native Loss (Learnable Temperature)
                 if use_clip_loss:
-                    loss, _, _ = self.model.forward_with_clip_loss(images, input_ids, attention_mask)
+                    loss_clip, logits_per_image, logits_per_text = self.model.forward_with_clip_loss(
+                        images, input_ids, attention_mask
+                    )
                 
                 # Option B: Use Custom Loss (Fixed Temperature + Intra-Modal)
                 else:
@@ -146,7 +221,36 @@ class Trainer:
                         _, txt_aug_embeds = self.model(images, input_ids, attention_mask)
                     
                     # Loss Calculation
-                    loss = self.criterion(img_embeds, txt_embeds, img_aug_embeds, txt_aug_embeds)
+                    loss_clip = self.criterion(img_embeds, txt_embeds, img_aug_embeds, txt_aug_embeds)
+                
+                # ---------------------------------------------------------
+                # Knowledge Distillation Loss (Non-AMP path)
+                # ---------------------------------------------------------
+                loss_distill = torch.tensor(0.0, device=self.device)
+                
+                if self.use_distillation and soft_target_indices is not None:
+                    # Compute text-to-text similarity logits for distillation
+                    if use_clip_loss:
+                        txt_embeds = self.model.clip.get_text_features(
+                            input_ids=input_ids,
+                            attention_mask=attention_mask
+                        )
+                        txt_embeds = F.normalize(txt_embeds, p=2, dim=1)
+                    
+                    # Text-to-text similarity matrix
+                    student_text_logits = txt_embeds @ txt_embeds.t()
+                    
+                    loss_distill = self.distill_loss_fn(
+                        student_logits=student_text_logits,
+                        batch_indices=batch_indices,
+                        teacher_indices=soft_target_indices,
+                        teacher_scores=soft_target_scores
+                    )
+                    
+                    # Combine losses
+                    loss = (1 - self.distill_alpha) * loss_clip + self.distill_alpha * loss_distill
+                else:
+                    loss = loss_clip
                 
                 # Backward
                 self.optimizer.zero_grad()
@@ -156,19 +260,35 @@ class Trainer:
             self.scheduler.step()
             
             losses.update(loss.item(), images.size(0))
+            losses_clip.update(loss_clip.item(), images.size(0))
+            if self.use_distillation:
+                losses_distill.update(loss_distill.item(), images.size(0))
             
 
             if step % self.log_freq == 0:
                 current_lr = self.optimizer.param_groups[0]['lr']
-                logger.info(f"Epoch {epoch+1} [{step}/{num_batches}] Loss: {losses.avg:.4f} | LR: {current_lr:.6f}")
+                
+                if self.use_distillation:
+                    logger.info(
+                        f"Epoch {epoch+1} [{step}/{num_batches}] "
+                        f"Loss: {losses.avg:.4f} (CLIP: {losses_clip.avg:.4f}, Distill: {losses_distill.avg:.4f}) | "
+                        f"LR: {current_lr:.6f}"
+                    )
+                else:
+                    logger.info(f"Epoch {epoch+1} [{step}/{num_batches}] Loss: {losses.avg:.4f} | LR: {current_lr:.6f}")
                 
                 if self.use_wandb:
                     try:
-                        wandb.log({
+                        log_dict = {
                             "train/loss": losses.val, 
+                            "train/loss_clip": losses_clip.val,
                             "train/epoch": epoch,
                             "train/lr": current_lr
-                        })
+                        }
+                        if self.use_distillation:
+                            log_dict["train/loss_distill"] = losses_distill.val
+                        
+                        wandb.log(log_dict)
                     except Exception as e:
                         logger.warning(f"Failed to log to W&B: {e}")
         
