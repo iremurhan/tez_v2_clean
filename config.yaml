@@ -77,7 +77,7 @@ augment:
 # Debug Configuration
 # ==========================================
 debug:
-  debug_mode: true         # Set true to use tiny subset
+  debug_mode: false         # Set true to use tiny subset
   debug_samples: 100       # Only use 100 images for debugging
   disable_wandb_sync: true  # Don't upload debug logs
 
